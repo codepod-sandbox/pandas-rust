@@ -1,0 +1,9 @@
+[package]
+name = "pandas-rust-core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+indexmap = "2"
+thiserror = "2"
+csv = "1"
