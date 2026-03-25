@@ -12,6 +12,28 @@ class DataFrame:
             self._native = _native.DataFrame(data)
         elif isinstance(data, _native.DataFrame):
             self._native = data
+        elif isinstance(data, list):
+            if len(data) == 0:
+                self._native = _native.DataFrame({})
+            elif isinstance(data[0], dict):
+                # Collect all keys in insertion order (preserving first-seen order).
+                keys = []
+                seen = set()
+                for row in data:
+                    for k in row:
+                        if k not in seen:
+                            keys.append(k)
+                            seen.add(k)
+                # Build column lists; missing keys default to None.
+                col_data = {k: [] for k in keys}
+                for row in data:
+                    for k in keys:
+                        col_data[k].append(row.get(k, None))
+                self._native = _native.DataFrame(col_data)
+            else:
+                raise TypeError(
+                    "Cannot construct DataFrame from list of {}".format(type(data[0]))
+                )
         else:
             raise TypeError("Cannot construct DataFrame from {}".format(type(data)))
 
@@ -129,6 +151,15 @@ class DataFrame:
 
     def notna(self):
         return DataFrame._from_native(self._native.notna())
+
+    def duplicated(self, subset=None, keep="first"):
+        from .series import Series
+        result = self._native.duplicated(subset, keep)
+        return Series._from_native(result)
+
+    def drop_duplicates(self, subset=None, keep="first"):
+        result = self._native.drop_duplicates(subset, keep)
+        return DataFrame._from_native(result)
 
     # GroupBy & Merge
     def groupby(self, by):

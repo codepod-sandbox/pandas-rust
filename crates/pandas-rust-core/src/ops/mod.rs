@@ -4,3 +4,4 @@ pub mod comparison;
 pub mod filter;
 pub mod nulls;
 pub mod sort;
+pub mod unique;

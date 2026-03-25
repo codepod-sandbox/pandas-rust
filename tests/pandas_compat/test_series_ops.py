@@ -367,3 +367,34 @@ def test_series_dropna_no_nulls():
     s2 = s.dropna()
     assert len(s2) == 3
     assert s2.tolist() == [1.0, 2.0, 3.0]
+
+
+# ---------------------------------------------------------------------------
+# value_counts / unique / nunique / duplicated
+# ---------------------------------------------------------------------------
+
+def test_value_counts_basic():
+    s = pd.Series([1, 2, 1, 3, 2, 2], name="x")
+    vc = s.value_counts()
+    counts = vc["count"].tolist()
+    # First entry should be highest count (3 for value 2).
+    assert counts[0] == 3
+    assert len(counts) == 3
+
+
+def test_unique_preserves_order():
+    s = pd.Series([3, 1, 2, 1, 3], name="x")
+    result = s.unique()
+    # First occurrence order should be: 3, 1, 2
+    assert result == [3, 1, 2]
+
+
+def test_nunique():
+    s = pd.Series([1, 2, 1, 3, 2], name="x")
+    assert s.nunique() == 3
+
+
+def test_duplicated_first():
+    s = pd.Series([1, 2, 1, 3, 2], name="x")
+    d = s.duplicated(keep="first")
+    assert d.tolist() == [False, False, True, False, True]

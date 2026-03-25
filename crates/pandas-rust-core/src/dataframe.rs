@@ -1,9 +1,10 @@
 use indexmap::IndexMap;
 
-use crate::column::Column;
+use crate::column::{Column, ColumnData};
 use crate::dtype::DType;
 use crate::error::{PandasError, Result};
 use crate::index::Index;
+use crate::ops::unique::{duplicated_multi, Keep};
 use crate::series::Series;
 
 /// A 2D labeled data structure — ordered collection of named columns.
@@ -172,6 +173,39 @@ impl DataFrame {
         })
     }
 
+    /// Return a Bool column marking duplicate rows.
+    ///
+    /// If `subset` is `Some`, only those columns are used for comparison.
+    /// Otherwise all columns are used.
+    pub fn duplicated_rows(&self, subset: Option<&[&str]>, keep: Keep) -> Result<Column> {
+        let col_refs: Vec<&Column> = match subset {
+            Some(names) => {
+                let mut cols = Vec::with_capacity(names.len());
+                for name in names {
+                    cols.push(self.get_column(name)?);
+                }
+                cols
+            }
+            None => self.columns.values().collect(),
+        };
+        Ok(duplicated_multi(&col_refs, keep))
+    }
+
+    /// Return a new DataFrame with duplicate rows removed.
+    ///
+    /// If `subset` is `Some`, only those columns are considered when determining
+    /// duplicates. `keep` controls which occurrence is retained.
+    pub fn drop_duplicates(&self, subset: Option<&[&str]>, keep: Keep) -> Result<DataFrame> {
+        let dup_col = self.duplicated_rows(subset, keep)?;
+        let keep_indices: Vec<usize> = (0..self.nrows())
+            .filter(|&i| match dup_col.data() {
+                ColumnData::Bool(v) => !v[i],
+                _ => true,
+            })
+            .collect();
+        self.take_rows(&keep_indices)
+    }
+
     /// Deep copy.
     pub fn copy(&self) -> DataFrame {
         self.clone()
@@ -301,5 +335,44 @@ mod tests {
                 ("c", DType::Str),
             ]
         );
+    }
+
+    #[test]
+    fn test_drop_duplicates_all_columns() {
+        let df = DataFrame::from_columns(vec![
+            Column::new("a", ColumnData::Int64(vec![1, 2, 1, 3])),
+            Column::new(
+                "b",
+                ColumnData::Str(vec!["x".into(), "y".into(), "x".into(), "z".into()]),
+            ),
+        ])
+        .unwrap();
+        let deduped = df.drop_duplicates(None, Keep::First).unwrap();
+        assert_eq!(deduped.nrows(), 3);
+    }
+
+    #[test]
+    fn test_drop_duplicates_subset() {
+        let df = DataFrame::from_columns(vec![
+            Column::new("a", ColumnData::Int64(vec![1, 1, 2])),
+            Column::new("b", ColumnData::Int64(vec![10, 20, 30])),
+        ])
+        .unwrap();
+        // Only column "a" considered; rows 0 and 1 share a=1, keep first.
+        let deduped = df.drop_duplicates(Some(&["a"]), Keep::First).unwrap();
+        assert_eq!(deduped.nrows(), 2);
+    }
+
+    #[test]
+    fn test_drop_duplicates_keep_last() {
+        let df = DataFrame::from_columns(vec![Column::new("a", ColumnData::Int64(vec![1, 2, 1]))])
+            .unwrap();
+        let deduped = df.drop_duplicates(None, Keep::Last).unwrap();
+        assert_eq!(deduped.nrows(), 2);
+        // Kept rows should be indices 1 and 2 (last occurrence of 1 is at index 2).
+        match deduped.get_column("a").unwrap().data() {
+            ColumnData::Int64(v) => assert_eq!(v, &[2, 1]),
+            _ => panic!(),
+        }
     }
 }

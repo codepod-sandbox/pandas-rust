@@ -65,3 +65,44 @@ def test_series_copy():
     s2 = s.copy()
     assert s2.tolist() == [1, 2, 3]
     assert s2.name == "x"
+
+
+def test_value_counts():
+    s = pd.Series([1, 2, 1, 3, 2, 2], name="x")
+    vc = s.value_counts()
+    # Returns a DataFrame with columns "value" and "count"
+    assert "value" in vc.columns
+    assert "count" in vc.columns
+    # Default: sort by count descending — 2 appears 3x
+    counts = vc["count"].tolist()
+    assert counts[0] == 3
+
+
+def test_unique():
+    s = pd.Series([1, 2, 1, 3, 2], name="x")
+    result = s.unique()
+    assert isinstance(result, list)
+    assert sorted(result) == [1, 2, 3]
+
+
+def test_nunique():
+    s = pd.Series([1, 2, 1, 3], name="x")
+    assert s.nunique() == 3
+
+
+def test_nunique_with_none():
+    s = pd.Series([1.0, None, 1.0, 2.0], name="x")
+    assert s.nunique() == 2        # dropna=True by default
+    assert s.nunique(dropna=False) == 3  # includes null as a distinct value
+
+
+def test_duplicated():
+    s = pd.Series([1, 2, 1, 3, 2], name="x")
+    d = s.duplicated()
+    assert d.tolist() == [False, False, True, False, True]
+
+
+def test_duplicated_keep_last():
+    s = pd.Series([1, 2, 1], name="x")
+    d = s.duplicated(keep="last")
+    assert d.tolist() == [True, False, False]

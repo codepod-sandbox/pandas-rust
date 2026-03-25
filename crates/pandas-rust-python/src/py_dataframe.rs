@@ -321,6 +321,47 @@ impl PyDataFrame {
         Ok(PyDataFrame::from_core(df))
     }
 
+    // --- duplicated / drop_duplicates ---
+
+    #[pymethod]
+    fn duplicated(
+        &self,
+        subset: vm::function::OptionalArg<PyObjectRef>,
+        keep: vm::function::OptionalArg<PyObjectRef>,
+        vm: &VirtualMachine,
+    ) -> PyResult<PySeries> {
+        use pandas_rust_core::Series;
+        let keep_enum = crate::py_series::parse_keep_arg(keep.into_option().as_ref(), vm)?;
+        let df = self.inner();
+        let subset_names = parse_optional_subset(subset.into_option().as_ref(), vm)?;
+        let subset_refs: Option<Vec<&str>> = subset_names
+            .as_ref()
+            .map(|v| v.iter().map(|s| s.as_str()).collect());
+        let col = df
+            .duplicated_rows(subset_refs.as_deref(), keep_enum)
+            .map_err(|e| pandas_err(e, vm))?;
+        Ok(PySeries::from_core(Series::new(col)))
+    }
+
+    #[pymethod]
+    fn drop_duplicates(
+        &self,
+        subset: vm::function::OptionalArg<PyObjectRef>,
+        keep: vm::function::OptionalArg<PyObjectRef>,
+        vm: &VirtualMachine,
+    ) -> PyResult<PyDataFrame> {
+        let keep_enum = crate::py_series::parse_keep_arg(keep.into_option().as_ref(), vm)?;
+        let df = self.inner();
+        let subset_names = parse_optional_subset(subset.into_option().as_ref(), vm)?;
+        let subset_refs: Option<Vec<&str>> = subset_names
+            .as_ref()
+            .map(|v| v.iter().map(|s| s.as_str()).collect());
+        let result = df
+            .drop_duplicates(subset_refs.as_deref(), keep_enum)
+            .map_err(|e| pandas_err(e, vm))?;
+        Ok(PyDataFrame::from_core(result))
+    }
+
     // --- copy ---
 
     #[pymethod]
@@ -649,9 +690,9 @@ impl PyDataFrame {
         }
 
         // Check if all columns are numeric
-        let all_numeric = df.iter_columns().all(|(_, col)| {
-            matches!(col.dtype(), DType::Int64 | DType::Float64 | DType::Bool)
-        });
+        let all_numeric = df
+            .iter_columns()
+            .all(|(_, col)| matches!(col.dtype(), DType::Int64 | DType::Float64 | DType::Bool));
 
         if !all_numeric {
             return Err(vm.new_type_error(
@@ -685,6 +726,40 @@ impl PyDataFrame {
     #[pygetset]
     fn values(&self, vm: &VirtualMachine) -> PyResult<PyObjectRef> {
         self.to_numpy(vm)
+    }
+}
+
+// --- Module-level helpers ---
+
+fn parse_optional_subset(
+    subset: Option<&PyObjectRef>,
+    vm: &VirtualMachine,
+) -> PyResult<Option<Vec<String>>> {
+    match subset {
+        None => Ok(None),
+        Some(obj) => {
+            if vm.is_none(obj) {
+                return Ok(None);
+            }
+            if let Some(s) = obj.downcast_ref::<PyStr>() {
+                return Ok(Some(vec![s.as_str().to_owned()]));
+            }
+            if let Some(list) = obj.downcast_ref::<PyList>() {
+                let items = list.borrow_vec();
+                let names: PyResult<Vec<String>> = items
+                    .iter()
+                    .map(|item| {
+                        item.downcast_ref::<PyStr>()
+                            .map(|s| s.as_str().to_owned())
+                            .ok_or_else(|| {
+                                vm.new_type_error("subset names must be strings".to_owned())
+                            })
+                    })
+                    .collect();
+                return Ok(Some(names?));
+            }
+            Err(vm.new_type_error("subset must be a string or list of strings".to_owned()))
+        }
     }
 }
 

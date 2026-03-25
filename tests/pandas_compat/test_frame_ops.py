@@ -269,3 +269,26 @@ def test_median_even_count():
     df = pd.DataFrame({"a": [1.0, 2.0, 3.0, 4.0]})
     result = df.median()
     assert result["a"] == 2.5
+
+
+# ---------------------------------------------------------------------------
+# list-of-dicts construction
+# ---------------------------------------------------------------------------
+
+def test_from_list_of_dicts():
+    data = [{"a": 1, "b": "x"}, {"a": 2, "b": "y"}]
+    df = pd.DataFrame(data)
+    assert df.shape == (2, 2)
+    assert df["a"].tolist() == [1, 2]
+    assert df["b"].tolist() == ["x", "y"]
+
+
+# ---------------------------------------------------------------------------
+# drop_duplicates
+# ---------------------------------------------------------------------------
+
+def test_drop_duplicates_basic():
+    df = pd.DataFrame({"a": [1, 2, 1, 3], "b": [10, 20, 10, 30]})
+    df2 = df.drop_duplicates()
+    assert df2.shape == (3, 2)
+    assert df2["a"].tolist() == [1, 2, 3]

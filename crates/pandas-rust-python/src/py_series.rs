@@ -5,7 +5,7 @@ use vm::types::{AsNumber, Representable};
 use vm::{Py, PyObject, PyObjectRef, PyPayload, PyResult, VirtualMachine};
 
 use pandas_rust_core::column::ColumnData;
-use pandas_rust_core::ops::{aggregation, arithmetic, comparison, nulls, sort};
+use pandas_rust_core::ops::{aggregation, arithmetic, comparison, nulls, sort, unique};
 use pandas_rust_core::{DType, Series};
 
 use crate::py_column::{
@@ -378,7 +378,13 @@ impl PySeries {
                         .iter()
                         .enumerate()
                         .map(|(i, &b)| {
-                            if col.is_null(i) { f64::NAN } else if b { 1.0 } else { 0.0 }
+                            if col.is_null(i) {
+                                f64::NAN
+                            } else if b {
+                                1.0
+                            } else {
+                                0.0
+                            }
                         })
                         .collect();
                     NdArray::from_vec(floats)
@@ -411,9 +417,7 @@ impl PySeries {
                     NdArray::from_vec(v.clone())
                 }
             }
-            ColumnData::Str(v) => {
-                NdArray::from_vec(v.clone())
-            }
+            ColumnData::Str(v) => NdArray::from_vec(v.clone()),
         };
         Ok(PyNdArray::from_core(arr).into_pyobject(vm))
     }
@@ -421,6 +425,86 @@ impl PySeries {
     #[pygetset]
     fn values(&self, vm: &VirtualMachine) -> PyResult<PyObjectRef> {
         self.to_numpy(vm)
+    }
+
+    // --- unique / nunique / value_counts / duplicated ---
+
+    #[pymethod]
+    fn unique(&self, vm: &VirtualMachine) -> PyResult<PyObjectRef> {
+        let col = unique::unique(self.inner.column());
+        column_to_pylist(&col, vm)
+    }
+
+    #[pymethod]
+    fn nunique(&self, dropna: vm::function::OptionalArg<bool>, _vm: &VirtualMachine) -> usize {
+        let dropna = dropna.unwrap_or(true);
+        unique::nunique(self.inner.column(), dropna)
+    }
+
+    /// Returns a PyDataFrame with columns ["value", "count"].
+    #[pymethod]
+    fn value_counts(
+        &self,
+        sort: vm::function::OptionalArg<bool>,
+        ascending: vm::function::OptionalArg<bool>,
+        dropna: vm::function::OptionalArg<bool>,
+        vm: &VirtualMachine,
+    ) -> PyResult<PyObjectRef> {
+        use crate::py_dataframe::PyDataFrame;
+        use pandas_rust_core::DataFrame;
+
+        let sort = sort.unwrap_or(true);
+        let ascending = ascending.unwrap_or(false);
+        let dropna = dropna.unwrap_or(true);
+        let (vals_col, counts_col) =
+            unique::value_counts(self.inner.column(), sort, ascending, dropna);
+
+        let df =
+            DataFrame::from_columns(vec![vals_col, counts_col]).map_err(|e| pandas_err(e, vm))?;
+        Ok(PyDataFrame::from_core(df).into_pyobject(vm))
+    }
+
+    #[pymethod]
+    fn duplicated(
+        &self,
+        keep: vm::function::OptionalArg<PyObjectRef>,
+        vm: &VirtualMachine,
+    ) -> PyResult<PySeries> {
+        let keep_enum = parse_keep_arg(keep.into_option().as_ref(), vm)?;
+        let col = unique::duplicated(self.inner.column(), keep_enum);
+        Ok(PySeries::from_core(Series::new(col)))
+    }
+}
+
+pub fn parse_keep_arg(keep: Option<&PyObjectRef>, vm: &VirtualMachine) -> PyResult<unique::Keep> {
+    use vm::builtins::PyStr;
+    match keep {
+        None => Ok(unique::Keep::First),
+        Some(obj) => {
+            if vm.is_none(obj) {
+                return Ok(unique::Keep::MarkAll);
+            }
+            // Python False → MarkAll
+            if let Ok(b) = obj.clone().try_into_value::<bool>(vm) {
+                return if b {
+                    Err(vm.new_value_error("keep=True is not valid".to_owned()))
+                } else {
+                    Ok(unique::Keep::MarkAll)
+                };
+            }
+            if let Some(s) = obj.downcast_ref::<PyStr>() {
+                return match s.as_str() {
+                    "first" => Ok(unique::Keep::First),
+                    "last" => Ok(unique::Keep::Last),
+                    "false" | "False" => Ok(unique::Keep::MarkAll),
+                    other => Err(vm.new_value_error(format!(
+                        "keep must be 'first', 'last', or False, got '{}'",
+                        other
+                    ))),
+                };
+            }
+            Err(vm.new_type_error("keep must be a string or False".to_owned()))
+        }
     }
 }
 

@@ -140,6 +140,20 @@ class Series:
         # Native returns {0: val, 1: val, ...}, preserve that
         return self._native.to_dict()
 
+    def value_counts(self, sort=True, ascending=False, dropna=True):
+        from .frame import DataFrame
+        result = self._native.value_counts(sort, ascending, dropna)
+        return DataFrame._from_native(result)
+
+    def unique(self):
+        return self._native.unique()
+
+    def nunique(self, dropna=True):
+        return self._native.nunique(dropna)
+
+    def duplicated(self, keep="first"):
+        return Series._from_native(self._native.duplicated(keep))
+
     def gt(self, other):
         return Series._from_native(self._native.gt(self._to_native_comparable(other)))
 

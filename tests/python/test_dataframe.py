@@ -105,3 +105,43 @@ def test_dataframe_isna():
 def test_dataframe_len():
     df = pd.DataFrame({"a": [1, 2, 3]})
     assert len(df) == 3
+
+
+def test_from_list_of_dicts():
+    data = [{"a": 1, "b": 10}, {"a": 2, "b": 20}, {"a": 3, "b": 30}]
+    df = pd.DataFrame(data)
+    assert df.shape == (3, 2)
+    assert list(df.columns) == ["a", "b"]
+    assert df["a"].tolist() == [1, 2, 3]
+    assert df["b"].tolist() == [10, 20, 30]
+
+
+def test_from_empty_list():
+    df = pd.DataFrame([])
+    assert df.shape == (0, 0)
+
+
+def test_from_list_of_dicts_missing_keys():
+    data = [{"a": 1}, {"a": 2, "b": 20}]
+    df = pd.DataFrame(data)
+    assert df.shape == (2, 2)
+    assert "a" in list(df.columns)
+    assert "b" in list(df.columns)
+
+
+def test_drop_duplicates():
+    df = pd.DataFrame({"a": [1, 2, 1, 3], "b": [10, 20, 10, 30]})
+    df2 = df.drop_duplicates()
+    assert df2.shape == (3, 2)
+
+
+def test_drop_duplicates_subset():
+    df = pd.DataFrame({"a": [1, 1, 2], "b": [10, 20, 30]})
+    df2 = df.drop_duplicates(subset=["a"])
+    assert df2.shape == (2, 2)
+
+
+def test_duplicated():
+    df = pd.DataFrame({"a": [1, 2, 1], "b": [10, 20, 10]})
+    d = df.duplicated()
+    assert d.tolist() == [False, False, True]
