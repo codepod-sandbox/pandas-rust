@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "pre-push: building"
+cargo build -p pandas-rust-wasm
+
+echo "pre-push: running python tests"
+target/debug/pandas-python -m pytest tests/python/
