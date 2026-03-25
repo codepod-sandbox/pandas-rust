@@ -1,0 +1,11 @@
+[package]
+name = "pandas-rust-python"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+pandas-rust-core = { path = "../pandas-rust-core" }
+numpy-rust-python = { path = "../../packages/numpy-rust/crates/numpy-rust-python", default-features = false }
+numpy-rust-core = { path = "../../packages/numpy-rust/crates/numpy-rust-core", default-features = false }
+rustpython-vm = { workspace = true }
+rustpython-derive = { workspace = true }

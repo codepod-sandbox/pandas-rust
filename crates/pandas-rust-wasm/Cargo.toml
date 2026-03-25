@@ -1,0 +1,14 @@
+[package]
+name = "pandas-rust-wasm"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "pandas-python"
+path = "src/main.rs"
+
+[dependencies]
+pandas-rust-python = { path = "../pandas-rust-python" }
+numpy-rust-python = { path = "../../packages/numpy-rust/crates/numpy-rust-python" }
+rustpython = { workspace = true, features = ["freeze-stdlib", "threading", "host_env"] }
+rustpython-vm = { workspace = true }
