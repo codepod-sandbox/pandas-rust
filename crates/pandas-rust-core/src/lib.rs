@@ -1,3 +1,4 @@
+pub mod casting;
 pub mod column;
 pub mod dataframe;
 pub mod dtype;
