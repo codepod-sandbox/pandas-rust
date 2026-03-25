@@ -631,6 +631,61 @@ impl PyDataFrame {
         let df = DataFrame::from_columns(result_cols).map_err(|e| pandas_err(e, vm))?;
         Ok(PyDataFrame::from_core(df))
     }
+
+    // --- numpy interop ---
+
+    #[pymethod]
+    fn to_numpy(&self, vm: &VirtualMachine) -> PyResult<PyObjectRef> {
+        use numpy_rust_core::NdArray;
+        use numpy_rust_python::py_array::PyNdArray;
+
+        let df = self.inner();
+        let nrows = df.nrows();
+        let ncols = df.ncols();
+
+        if ncols == 0 || nrows == 0 {
+            let arr = NdArray::from_vec(Vec::<f64>::new());
+            return Ok(PyNdArray::from_core(arr).into_pyobject(vm));
+        }
+
+        // Check if all columns are numeric
+        let all_numeric = df.iter_columns().all(|(_, col)| {
+            matches!(col.dtype(), DType::Int64 | DType::Float64 | DType::Bool)
+        });
+
+        if !all_numeric {
+            return Err(vm.new_type_error(
+                "Cannot convert DataFrame with string columns to numpy array. Use select_dtypes first.".to_owned(),
+            ));
+        }
+
+        // Build row-major flat vector (row 0 col 0, row 0 col 1, ...)
+        let mut flat = Vec::with_capacity(nrows * ncols);
+        for row_idx in 0..nrows {
+            for (_, col) in df.iter_columns() {
+                if col.is_null(row_idx) {
+                    flat.push(f64::NAN);
+                } else {
+                    match col.data() {
+                        ColumnData::Bool(v) => flat.push(if v[row_idx] { 1.0 } else { 0.0 }),
+                        ColumnData::Int64(v) => flat.push(v[row_idx] as f64),
+                        ColumnData::Float64(v) => flat.push(v[row_idx]),
+                        ColumnData::Str(_) => unreachable!(),
+                    }
+                }
+            }
+        }
+
+        let arr = NdArray::from_vec(flat)
+            .reshape(&[nrows, ncols])
+            .map_err(|e| vm.new_value_error(e.to_string()))?;
+        Ok(PyNdArray::from_core(arr).into_pyobject(vm))
+    }
+
+    #[pygetset]
+    fn values(&self, vm: &VirtualMachine) -> PyResult<PyObjectRef> {
+        self.to_numpy(vm)
+    }
 }
 
 // --- Private helper methods ---

@@ -363,6 +363,65 @@ impl PySeries {
         }
         Ok(dict.into())
     }
+
+    #[pymethod]
+    fn to_numpy(&self, vm: &VirtualMachine) -> PyResult<PyObjectRef> {
+        use numpy_rust_core::NdArray;
+        use numpy_rust_python::py_array::PyNdArray;
+
+        let col = self.inner.column();
+        let arr = match col.data() {
+            ColumnData::Bool(v) => {
+                if col.has_nulls() {
+                    // Promote to f64, nulls become NaN
+                    let floats: Vec<f64> = v
+                        .iter()
+                        .enumerate()
+                        .map(|(i, &b)| {
+                            if col.is_null(i) { f64::NAN } else if b { 1.0 } else { 0.0 }
+                        })
+                        .collect();
+                    NdArray::from_vec(floats)
+                } else {
+                    NdArray::from_vec(v.clone())
+                }
+            }
+            ColumnData::Int64(v) => {
+                if col.has_nulls() {
+                    // Promote to f64, nulls become NaN
+                    let floats: Vec<f64> = v
+                        .iter()
+                        .enumerate()
+                        .map(|(i, &x)| if col.is_null(i) { f64::NAN } else { x as f64 })
+                        .collect();
+                    NdArray::from_vec(floats)
+                } else {
+                    NdArray::from_vec(v.clone())
+                }
+            }
+            ColumnData::Float64(v) => {
+                if col.has_nulls() {
+                    let floats: Vec<f64> = v
+                        .iter()
+                        .enumerate()
+                        .map(|(i, &x)| if col.is_null(i) { f64::NAN } else { x })
+                        .collect();
+                    NdArray::from_vec(floats)
+                } else {
+                    NdArray::from_vec(v.clone())
+                }
+            }
+            ColumnData::Str(v) => {
+                NdArray::from_vec(v.clone())
+            }
+        };
+        Ok(PyNdArray::from_core(arr).into_pyobject(vm))
+    }
+
+    #[pygetset]
+    fn values(&self, vm: &VirtualMachine) -> PyResult<PyObjectRef> {
+        self.to_numpy(vm)
+    }
 }
 
 impl Representable for PySeries {

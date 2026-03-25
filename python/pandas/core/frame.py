@@ -162,6 +162,13 @@ class DataFrame:
     def to_dict(self, orient="dict"):
         return self._native.to_dict()
 
+    def to_numpy(self):
+        return self._native.to_numpy()
+
+    @property
+    def values(self):
+        return self._native.values
+
     def info(self):
         """Print summary info about the DataFrame."""
         print("<class 'pandas.core.frame.DataFrame'>")

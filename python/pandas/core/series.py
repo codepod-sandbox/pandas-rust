@@ -129,6 +129,13 @@ class Series:
     def tolist(self):
         return self._native.tolist()
 
+    def to_numpy(self):
+        return self._native.to_numpy()
+
+    @property
+    def values(self):
+        return self._native.values
+
     def to_dict(self):
         # Native returns {0: val, 1: val, ...}, preserve that
         return self._native.to_dict()
