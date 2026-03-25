@@ -2,8 +2,10 @@ pub mod column;
 pub mod dtype;
 pub mod error;
 pub mod index;
+pub mod series;
 
 pub use column::{Column, ColumnData};
 pub use dtype::DType;
 pub use error::{PandasError, Result};
 pub use index::{Index, RangeIndex};
+pub use series::Series;
