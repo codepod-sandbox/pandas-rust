@@ -22,6 +22,7 @@ impl fmt::Display for DType {
 
 impl DType {
     /// Parse a dtype string (e.g., "int64", "float64", "bool", "object"/"str").
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<DType> {
         match s {
             "bool" => Some(DType::Bool),
