@@ -3,6 +3,7 @@ pub mod dataframe;
 pub mod dtype;
 pub mod error;
 pub mod index;
+pub mod ops;
 pub mod series;
 
 pub use column::{Column, ColumnData};
