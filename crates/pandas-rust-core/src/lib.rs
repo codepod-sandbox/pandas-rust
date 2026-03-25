@@ -1,5 +1,6 @@
 pub mod casting;
 pub mod column;
+pub mod concat;
 pub mod dataframe;
 pub mod dtype;
 pub mod error;
