@@ -4,7 +4,10 @@ pub mod concat;
 pub mod dataframe;
 pub mod dtype;
 pub mod error;
+pub mod groupby;
 pub mod index;
+pub mod io;
+pub mod merge;
 pub mod ops;
 pub mod series;
 
