@@ -506,6 +506,75 @@ class DataFrame:
     def values(self):
         return self._native.values
 
+    # --- Properties: size, ndim, empty ---
+
+    @property
+    def size(self):
+        """Total number of elements (rows * columns)."""
+        s = self.shape
+        return s[0] * s[1]
+
+    @property
+    def ndim(self):
+        """Number of dimensions (always 2 for DataFrame)."""
+        return 2
+
+    @property
+    def empty(self):
+        """True if DataFrame has no rows or no columns."""
+        s = self.shape
+        return s[0] == 0 or s[1] == 0
+
+    # --- filter ---
+
+    def filter(self, items=None, like=None, regex=None, axis=1):
+        """Subset rows or columns according to labels."""
+        if items is not None:
+            cols = [c for c in items if c in self.columns]
+            return self[cols]
+        elif like is not None:
+            cols = [c for c in self.columns if like in c]
+            return self[cols]
+        elif regex is not None:
+            import re
+            pat = re.compile(regex)
+            cols = [c for c in self.columns if pat.search(c)]
+            return self[cols]
+        raise TypeError("Must pass either `items`, `like`, or `regex`")
+
+    # --- pop ---
+
+    def pop(self, item):
+        """Remove and return column as a Series."""
+        result = self[item]
+        cols = [c for c in self.columns if c != item]
+        new_data = {c: self[c].tolist() for c in cols}
+        self._native = _native.DataFrame(new_data)
+        return result
+
+    # --- add_prefix / add_suffix ---
+
+    def add_prefix(self, prefix):
+        """Prefix column labels with string prefix."""
+        return self.rename(columns={c: str(prefix) + c for c in self.columns})
+
+    def add_suffix(self, suffix):
+        """Suffix column labels with string suffix."""
+        return self.rename(columns={c: c + str(suffix) for c in self.columns})
+
+    # --- to_string ---
+
+    def to_string(self):
+        """Render DataFrame to a console-friendly tabular output."""
+        return repr(self)
+
+    # --- axes ---
+
+    @property
+    def axes(self):
+        """Return list of axes [row_index, columns]."""
+        return [self.index, self.columns]
+
     def info(self):
         """Print summary info about the DataFrame."""
         print("<class 'pandas.core.frame.DataFrame'>")

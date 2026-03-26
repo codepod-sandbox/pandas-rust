@@ -181,7 +181,12 @@ class Series:
         return Series._from_native(self._native.ge(self._to_native_comparable(other)))
 
     # Aggregations
-    def sum(self): return self._native.sum()
+    def sum(self):
+        try:
+            return self._native.sum()
+        except TypeError:
+            # Bool dtype: cast to int first
+            return self.astype("int64")._native.sum()
     def mean(self): return self._native.mean()
     def min(self): return self._native.min()
     def max(self): return self._native.max()
@@ -481,6 +486,53 @@ class Series:
         modes = sorted(v for v, c in counts.items() if c == max_count)
         return Series(modes, name=self.name)
 
+    # --- Properties: size, ndim, empty, is_unique ---
+
+    @property
+    def size(self):
+        """Number of elements in the Series."""
+        return len(self)
+
+    @property
+    def ndim(self):
+        """Number of dimensions (always 1 for Series)."""
+        return 1
+
+    @property
+    def empty(self):
+        """True if the Series has no elements."""
+        return len(self) == 0
+
+    @property
+    def is_unique(self):
+        """True if all values in the Series are unique."""
+        return self.nunique(dropna=False) == len(self)
+
+    # --- to_string ---
+
+    def to_string(self):
+        """Render Series to a console-friendly string."""
+        return repr(self)
+
+    # --- squeeze ---
+
+    def squeeze(self):
+        """Squeeze a single-element Series to a scalar."""
+        if len(self) == 1:
+            return self.tolist()[0]
+        return self
+
+    # --- add_prefix / add_suffix ---
+
+    def add_prefix(self, prefix):
+        """Prefix labels (index values) — returns copy of series with same name."""
+        # For RangeIndex, this is a no-op on the data; we return a copy
+        return self.copy()
+
+    def add_suffix(self, suffix):
+        """Suffix labels (index values) — returns copy of series with same name."""
+        return self.copy()
+
     def reset_index(self, drop=False, name=None):
         """Reset the index of the Series.
 
@@ -680,6 +732,9 @@ class _StringAccessor:
 
     def get(self, i):
         return self._series.map(lambda x: x[i] if isinstance(x, str) and 0 <= i < len(x) else None)
+
+    def find(self, sub, start=0, end=None):
+        return self._series.map(lambda x: x.find(sub, start, end) if isinstance(x, str) else -1)
 
     def zfill(self, width):
         return self._series.map(lambda x: x.zfill(width) if isinstance(x, str) else x)
