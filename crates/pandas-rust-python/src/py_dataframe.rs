@@ -240,20 +240,75 @@ impl PyDataFrame {
     fn sort_values(
         &self,
         by: PyObjectRef,
-        ascending: vm::function::OptionalArg<bool>,
+        ascending: PyObjectRef,
         vm: &VirtualMachine,
     ) -> PyResult<PyDataFrame> {
-        let asc = ascending.unwrap_or(true);
-        let col_name = by
-            .downcast_ref::<PyStr>()
-            .ok_or_else(|| vm.new_type_error("'by' must be a string".to_owned()))?;
+        // Parse `by` into a list of column name strings
+        let col_names: Vec<String> = if let Some(s) = by.downcast_ref::<PyStr>() {
+            vec![s.as_str().to_owned()]
+        } else if let Some(list) = by.downcast_ref::<PyList>() {
+            let items = list.borrow_vec();
+            items
+                .iter()
+                .map(|item| {
+                    item.downcast_ref::<PyStr>()
+                        .map(|s| s.as_str().to_owned())
+                        .ok_or_else(|| vm.new_type_error("column names in 'by' must be strings".to_owned()))
+                })
+                .collect::<PyResult<Vec<_>>>()?
+        } else {
+            return Err(vm.new_type_error("'by' must be a string or list of strings".to_owned()));
+        };
+
+        let n = col_names.len();
+
+        /// Helper: convert one PyObject to bool
+        fn pyobj_to_bool(obj: &PyObjectRef, vm: &VirtualMachine) -> PyResult<bool> {
+            if let Ok(b) = obj.clone().try_into_value::<bool>(vm) {
+                return Ok(b);
+            }
+            // fallback: use Python truth test
+            obj.clone().is_true(vm)
+        }
+
+        // Parse `ascending` — could be bool or list of bool
+        let asc_values: Vec<bool> = if let Some(list) = ascending.downcast_ref::<PyList>() {
+            let items = list.borrow_vec();
+            items
+                .iter()
+                .map(|item| pyobj_to_bool(item, vm))
+                .collect::<PyResult<Vec<_>>>()?
+        } else {
+            let b = pyobj_to_bool(&ascending, vm).unwrap_or(true);
+            vec![b; n]
+        };
+
+        // If single bool was given for multiple columns, broadcast it
+        let asc_values: Vec<bool> = if asc_values.len() == 1 && n > 1 {
+            vec![asc_values[0]; n]
+        } else {
+            asc_values
+        };
+
         let df = self.inner();
-        let col = df
-            .get_column(col_name.as_str())
-            .map_err(|e| pandas_err(e, vm))?;
-        let indices = sort::argsort_column(col, asc);
-        let sub = df.take_rows(&indices).map_err(|e| pandas_err(e, vm))?;
-        Ok(PyDataFrame::from_core(sub))
+
+        if n == 1 {
+            let col = df
+                .get_column(&col_names[0])
+                .map_err(|e| pandas_err(e, vm))?;
+            let indices = sort::argsort_column(col, asc_values[0]);
+            let sub = df.take_rows(&indices).map_err(|e| pandas_err(e, vm))?;
+            Ok(PyDataFrame::from_core(sub))
+        } else {
+            let cols: PyResult<Vec<&Column>> = col_names
+                .iter()
+                .map(|name| df.get_column(name.as_str()).map_err(|e| pandas_err(e, vm)))
+                .collect();
+            let cols = cols?;
+            let indices = sort::argsort_multi(&cols, &asc_values).map_err(|e| pandas_err(e, vm))?;
+            let sub = df.take_rows(&indices).map_err(|e| pandas_err(e, vm))?;
+            Ok(PyDataFrame::from_core(sub))
+        }
     }
 
     // --- drop ---

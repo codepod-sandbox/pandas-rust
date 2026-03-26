@@ -2,6 +2,27 @@
 import _pandas_native as _native
 
 
+class _PythonSeries:
+    """Lightweight pure-Python series for types the native layer cannot store (e.g. list of lists)."""
+
+    def __init__(self, data, name=None):
+        self._data = list(data)
+        self._name = name
+
+    @property
+    def name(self):
+        return self._name
+
+    def tolist(self):
+        return list(self._data)
+
+    def __len__(self):
+        return len(self._data)
+
+    def __repr__(self):
+        return "_PythonSeries({})".format(self._data)
+
+
 class Series:
     """One-dimensional labeled array."""
 
@@ -250,3 +271,79 @@ class Series:
     def all(self):
         """Return True if all values are truthy."""
         return self._native.all()
+
+    @property
+    def str(self):
+        """String accessor for object-dtype Series."""
+        return _StringAccessor(self)
+
+
+class _StringAccessor:
+    """Vectorized string operations for Series."""
+
+    def __init__(self, series):
+        self._series = series
+
+    def upper(self):
+        return self._series.map(lambda x: x.upper() if isinstance(x, str) else x)
+
+    def lower(self):
+        return self._series.map(lambda x: x.lower() if isinstance(x, str) else x)
+
+    def strip(self):
+        return self._series.map(lambda x: x.strip() if isinstance(x, str) else x)
+
+    def lstrip(self):
+        return self._series.map(lambda x: x.lstrip() if isinstance(x, str) else x)
+
+    def rstrip(self):
+        return self._series.map(lambda x: x.rstrip() if isinstance(x, str) else x)
+
+    def len(self):
+        return self._series.map(lambda x: len(x) if isinstance(x, str) else None)
+
+    def contains(self, pat, case=True, na=False):
+        if case:
+            return self._series.map(lambda x: pat in x if isinstance(x, str) else na)
+        else:
+            pat_lower = pat.lower()
+            return self._series.map(lambda x: pat_lower in x.lower() if isinstance(x, str) else na)
+
+    def startswith(self, pat):
+        return self._series.map(lambda x: x.startswith(pat) if isinstance(x, str) else False)
+
+    def endswith(self, pat):
+        return self._series.map(lambda x: x.endswith(pat) if isinstance(x, str) else False)
+
+    def replace(self, pat, repl, n=-1, case=True, regex=False):
+        return self._series.map(lambda x: x.replace(pat, repl) if isinstance(x, str) else x)
+
+    def split(self, pat=None, n=-1, expand=False):
+        vals = self._series.tolist()
+        if pat is None:
+            results = [x.split() if isinstance(x, str) else x for x in vals]
+        else:
+            results = [x.split(pat) if isinstance(x, str) else x for x in vals]
+        return _PythonSeries(results, name=self._series.name)
+
+    def cat(self, others=None, sep="", na_rep=None):
+        vals = self._series.tolist()
+        return sep.join(str(v) for v in vals if v is not None)
+
+    def slice(self, start=None, stop=None, step=None):
+        return self._series.map(lambda x: x[start:stop:step] if isinstance(x, str) else x)
+
+    def get(self, i):
+        return self._series.map(lambda x: x[i] if isinstance(x, str) and 0 <= i < len(x) else None)
+
+    def zfill(self, width):
+        return self._series.map(lambda x: x.zfill(width) if isinstance(x, str) else x)
+
+    def title(self):
+        return self._series.map(lambda x: x.title() if isinstance(x, str) else x)
+
+    def capitalize(self):
+        return self._series.map(lambda x: x.capitalize() if isinstance(x, str) else x)
+
+    def __repr__(self):
+        return "_StringAccessor"

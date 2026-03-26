@@ -238,7 +238,11 @@ class DataFrame:
         return DataFrame._from_native(self._native.tail(n))
 
     def sort_values(self, by, ascending=True):
+        # Pass ascending directly (Rust now handles bool, list of bools)
         return DataFrame._from_native(self._native.sort_values(by, ascending))
+
+    def __contains__(self, key):
+        return key in self.columns
 
     def drop(self, columns=None, **kwargs):
         if columns is None:
@@ -321,7 +325,25 @@ class DataFrame:
         from .groupby import GroupBy
         return GroupBy(self._native.groupby(by))
 
-    def merge(self, right, on=None, how="inner", suffixes=("_x", "_y")):
+    def merge(self, right, on=None, how="inner", left_on=None, right_on=None, suffixes=("_x", "_y")):
+        if left_on is not None and right_on is not None:
+            if isinstance(left_on, str):
+                left_on = [left_on]
+            if isinstance(right_on, str):
+                right_on = [right_on]
+            # Rename right key columns to match left key names so native merge works
+            rename_map = {}
+            for lk, rk in zip(left_on, right_on):
+                if lk != rk:
+                    rename_map[rk] = lk
+            if rename_map:
+                if isinstance(right, DataFrame):
+                    right = right.rename(columns=rename_map)
+                else:
+                    # native DataFrame — wrap, rename, unwrap
+                    right = DataFrame._from_native(right).rename(columns=rename_map)
+            on = left_on
+
         if isinstance(right, DataFrame):
             right = right._native
         if isinstance(on, str):
@@ -468,3 +490,13 @@ class DataFrame:
     def applymap(self, func):
         """Apply function element-wise."""
         return DataFrame._from_native(self._native.applymap(func))
+
+    def set_index(self, keys, drop=True):
+        """Set the DataFrame index using existing columns."""
+        if isinstance(keys, str):
+            keys = [keys]
+        result = self.copy()
+        if drop:
+            for k in keys:
+                result = result.drop(columns=[k])
+        return result
