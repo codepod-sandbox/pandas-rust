@@ -8,6 +8,29 @@ class _iLocIndexer:
     def __init__(self, df):
         self._df = df
 
+    def __setitem__(self, key, value):
+        if isinstance(key, tuple) and len(key) == 2:
+            row_idx, col_idx = key
+            if isinstance(col_idx, int):
+                col_name = self._df.columns[col_idx]
+            else:
+                col_name = col_idx
+            col_vals = self._df[col_name].tolist()
+            if isinstance(row_idx, int):
+                if row_idx < 0:
+                    row_idx = len(self._df) + row_idx
+                col_vals[row_idx] = value
+            self._df[col_name] = col_vals
+        elif isinstance(key, int):
+            if isinstance(value, dict):
+                actual_key = key
+                if actual_key < 0:
+                    actual_key = len(self._df) + actual_key
+                for col_name, val in value.items():
+                    col_vals = self._df[col_name].tolist()
+                    col_vals[actual_key] = val
+                    self._df[col_name] = col_vals
+
     def __getitem__(self, key):
         if isinstance(key, int):
             if key < 0:
@@ -52,6 +75,19 @@ class _LocIndexer:
 
     def __init__(self, df):
         self._df = df
+
+    def __setitem__(self, key, value):
+        if isinstance(key, tuple) and len(key) == 2:
+            row_label, col_name = key
+            col_vals = self._df[col_name].tolist()
+            col_vals[row_label] = value
+            self._df[col_name] = col_vals
+        elif isinstance(key, int):
+            if isinstance(value, dict):
+                for col_name, val in value.items():
+                    col_vals = self._df[col_name].tolist()
+                    col_vals[key] = val
+                    self._df[col_name] = col_vals
 
     def __getitem__(self, key):
         if isinstance(key, int):
@@ -199,6 +235,13 @@ class DataFrame:
     def __repr__(self):
         return repr(self._native)
 
+    def __getattr__(self, name):
+        # Only called when normal attribute lookup fails
+        try:
+            return self[name]
+        except (KeyError, TypeError):
+            raise AttributeError("'DataFrame' object has no attribute '{}'".format(name))
+
     @property
     def index(self):
         return _RangeIndex(self._native.index)
@@ -333,7 +376,7 @@ class DataFrame:
         if isinstance(by, str):
             by = [by]
         from .groupby import GroupBy
-        return GroupBy(self._native.groupby(by))
+        return GroupBy(self._native.groupby(by), parent_df=self, by_cols=by)
 
     def merge(self, right, on=None, how="inner", left_on=None, right_on=None, suffixes=("_x", "_y")):
         if left_on is not None and right_on is not None:
@@ -629,6 +672,49 @@ class DataFrame:
         for col in self.columns:
             result[col] = self[col].nunique()
         return result
+
+    def pivot_table(self, values=None, index=None, columns=None, aggfunc="mean"):
+        if index is None:
+            raise ValueError("index is required")
+        if isinstance(index, str):
+            index = [index]
+        if isinstance(values, str):
+            values = [values]
+        g = self.groupby(index)
+        if values:
+            g = g[values]
+        result = getattr(g, aggfunc)()
+        # If result is a Series (single-value column selected), wrap in DataFrame
+        from .series import Series
+        if isinstance(result, Series):
+            return DataFrame({result.name: result.tolist()})
+        return result
+
+    def agg(self, func):
+        if isinstance(func, str):
+            return getattr(self, func)()
+        elif isinstance(func, list):
+            # List of functions -> DataFrame with function names as rows
+            result = {}
+            for col in self.columns:
+                col_results = []
+                for f in func:
+                    val = getattr(self[col], f)()
+                    col_results.append(val)
+                result[col] = col_results
+            return DataFrame(result)
+        elif isinstance(func, dict):
+            result = {}
+            for col, f in func.items():
+                if isinstance(f, str):
+                    result[col] = [getattr(self[col], f)()]
+                elif isinstance(f, list):
+                    result[col] = [getattr(self[col], fn)() for fn in f]
+            return DataFrame(result)
+        raise TypeError("agg expects str, list, or dict")
+
+    def aggregate(self, func):
+        return self.agg(func)
 
     def join(self, other, how="left", **kwargs):
         """Join two DataFrames horizontally (by index)."""

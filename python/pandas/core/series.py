@@ -33,6 +33,19 @@ class Series:
             col_name = name or "0"
             df = _native.DataFrame({col_name: data})
             self._native = df.get_column(col_name)
+        elif isinstance(data, (int, float, str, bool)) and not isinstance(data, type):
+            # Scalar — if index provided, repeat; else single element
+            if index is not None:
+                data_list = [data] * len(index)
+            else:
+                data_list = [data]
+            col_name = name or "0"
+            df = _native.DataFrame({col_name: data_list})
+            self._native = df.get_column(col_name)
+        elif data is None:
+            col_name = name or "0"
+            df = _native.DataFrame({col_name: []})
+            self._native = df.get_column(col_name)
         else:
             raise TypeError("Cannot construct Series from {}".format(type(data)))
 
@@ -103,6 +116,28 @@ class Series:
 
     def __neg__(self):
         return Series._from_native(-self._native)
+
+    def __and__(self, other):
+        lhs = self.tolist()
+        if isinstance(other, Series):
+            rhs = other.tolist()
+        else:
+            rhs = list(other)
+        result = [bool(a) and bool(b) for a, b in zip(lhs, rhs)]
+        return Series(result, name=self.name)
+
+    def __or__(self, other):
+        lhs = self.tolist()
+        if isinstance(other, Series):
+            rhs = other.tolist()
+        else:
+            rhs = list(other)
+        result = [bool(a) or bool(b) for a, b in zip(lhs, rhs)]
+        return Series(result, name=self.name)
+
+    def __invert__(self):
+        result = [not bool(v) for v in self.tolist()]
+        return Series(result, name=self.name)
 
     def __radd__(self, other):
         return Series._from_native(self._native + self._coerce_scalar(other))

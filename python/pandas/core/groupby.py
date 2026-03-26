@@ -4,8 +4,10 @@
 class GroupBy:
     """GroupBy object wrapping native PyGroupBy."""
 
-    def __init__(self, native_groupby):
+    def __init__(self, native_groupby, parent_df=None, by_cols=None):
         self._native = native_groupby
+        self._parent_df = parent_df  # original DataFrame (Python wrapper)
+        self._by_cols = by_cols or []
 
     def __repr__(self):
         return repr(self._native)
@@ -65,6 +67,8 @@ class _ColumnGroupBy:
     def __init__(self, groupby, columns):
         self._groupby = groupby
         self._columns = columns
+        self._parent_df = groupby._parent_df
+        self._by_cols = groupby._by_cols
 
     def _apply_and_select(self, method_name):
         full_result = getattr(self._groupby, method_name)()
@@ -88,6 +92,47 @@ class _ColumnGroupBy:
         if isinstance(func, str):
             return self._apply_and_select(func)
         raise TypeError("agg expects a string for _ColumnGroupBy")
+
+    def transform(self, func):
+        from .series import Series
+        from .frame import DataFrame
+        if self._parent_df is None:
+            raise ValueError("transform requires parent DataFrame reference")
+
+        # Get aggregated result (includes by_cols + value cols)
+        agg_result = getattr(self._groupby, func)()
+
+        # Build lookup: group_key_values -> agg_value for each value column
+        result_cols = {}
+        for col_name in self._columns:
+            agg_vals = agg_result[col_name].tolist()
+            # Get the by-column values from the aggregated result
+            agg_keys = []
+            for by_col in self._by_cols:
+                agg_keys.append(agg_result[by_col].tolist())
+
+            # Build lookup dict: tuple(key_vals) -> agg_value
+            lookup = {}
+            for i in range(len(agg_vals)):
+                key = tuple(k[i] for k in agg_keys)
+                lookup[key] = agg_vals[i]
+
+            # Get by-column values from the parent (original) DataFrame
+            parent_keys = []
+            for by_col in self._by_cols:
+                parent_keys.append(self._parent_df[by_col].tolist())
+
+            # Broadcast aggregated values back to original DataFrame length
+            n = len(self._parent_df)
+            broadcast = []
+            for i in range(n):
+                key = tuple(k[i] for k in parent_keys)
+                broadcast.append(lookup.get(key))
+            result_cols[col_name] = broadcast
+
+        if len(self._columns) == 1:
+            return Series(result_cols[self._columns[0]], name=self._columns[0])
+        return DataFrame(result_cols)
 
     def __repr__(self):
         return "_ColumnGroupBy(columns={})".format(self._columns)
