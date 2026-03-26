@@ -282,10 +282,18 @@ class Series:
         # Native returns {0: val, 1: val, ...}, preserve that
         return self._native.to_dict()
 
-    def value_counts(self, sort=True, ascending=False, dropna=True):
+    def value_counts(self, sort=True, ascending=False, dropna=True, normalize=False):
         from .frame import DataFrame
         result = self._native.value_counts(sort, ascending, dropna)
-        return DataFrame._from_native(result)
+        df = DataFrame._from_native(result)
+        if normalize:
+            counts = df["count"].tolist()
+            total = sum(counts)
+            if total > 0:
+                normed = [c / total for c in counts]
+                new_data = {"value": df["value"].tolist(), "count": normed}
+                return DataFrame(new_data)
+        return df
 
     def unique(self):
         return self._native.unique()

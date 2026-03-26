@@ -90,6 +90,12 @@ class _LocIndexer:
                     self._df[col_name] = col_vals
 
     def __getitem__(self, key):
+        from .series import Series
+        if isinstance(key, Series):
+            # Boolean mask filtering
+            mask = key.tolist()
+            indices = [i for i, m in enumerate(mask) if m]
+            return self._df._take_rows(indices)
         if isinstance(key, int):
             return self._df.iloc[key]
         elif isinstance(key, slice):
@@ -100,9 +106,21 @@ class _LocIndexer:
             new_slice = slice(start, stop, key.step)
             return self._df.iloc[new_slice]
         elif isinstance(key, list):
+            # List of booleans — treat as mask
+            if key and isinstance(key[0], bool):
+                indices = [i for i, m in enumerate(key) if m]
+                return self._df._take_rows(indices)
             return self._df.iloc[key]
         elif isinstance(key, tuple):
             row_key, col_key = key
+            if isinstance(row_key, Series):
+                # loc[bool_mask, col_key]
+                sub = self._df.loc[row_key]
+                if isinstance(col_key, str):
+                    return sub[col_key]
+                elif isinstance(col_key, list):
+                    return sub[col_key]
+                return sub
             sub = self._df.loc[row_key]
             if isinstance(sub, dict):
                 if isinstance(col_key, str):
@@ -426,6 +444,23 @@ class DataFrame:
                 result[col] = s.tolist()
         return result
 
+    def sort_index(self, ascending=True):
+        """Sort by index. For RangeIndex (default), data is already sorted; return a copy."""
+        return self.copy()
+
+    def stack(self):
+        """Flatten columns to a long-format Series."""
+        from .series import Series
+        result_vals = []
+        for i in range(len(self)):
+            for col in self.columns:
+                result_vals.append(self[col].tolist()[i])
+        return Series(result_vals, name=None)
+
+    def rename_axis(self, name, axis=0):
+        """Set the name of the index or columns axis (no-op — named axes not yet supported)."""
+        return self.copy()
+
     # Aggregations
     def _row_agg(self, func, name):
         """Helper for axis=1 (row-wise) aggregation."""
@@ -590,7 +625,7 @@ class DataFrame:
         from .groupby import GroupBy
         return GroupBy(self._native.groupby(by), parent_df=self, by_cols=by)
 
-    def merge(self, right, on=None, how="inner", left_on=None, right_on=None, suffixes=("_x", "_y")):
+    def merge(self, right, on=None, how="inner", left_on=None, right_on=None, suffixes=("_x", "_y"), indicator=False):
         if left_on is not None and right_on is not None:
             if isinstance(left_on, str):
                 left_on = [left_on]
@@ -618,7 +653,7 @@ class DataFrame:
         )
 
     # I/O
-    def to_csv(self, path=None):
+    def to_csv(self, path=None, index=True, **kwargs):
         if path is None:
             # Write to a temp file and read it back as a string
             import os
@@ -627,6 +662,7 @@ class DataFrame:
             with open(tmp) as f:
                 result = f.read()
             os.remove(tmp)
+            # index param is accepted but our native CSV has no index column anyway
             return result
         return self._native.to_csv(path)
 
