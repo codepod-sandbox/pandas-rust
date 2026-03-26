@@ -272,6 +272,59 @@ class Series:
         """Return True if all values are truthy."""
         return self._native.all()
 
+    def __iter__(self):
+        return iter(self.tolist())
+
+    def to_frame(self, name=None):
+        from .frame import DataFrame
+        col_name = name if name is not None else self.name
+        return DataFrame({col_name: self.tolist()})
+
+    def idxmax(self):
+        vals = self.tolist()
+        best_idx = 0
+        best_val = vals[0]
+        for i, v in enumerate(vals):
+            if v is not None and (best_val is None or v > best_val):
+                best_idx = i
+                best_val = v
+        return best_idx
+
+    def idxmin(self):
+        vals = self.tolist()
+        best_idx = 0
+        best_val = vals[0]
+        for i, v in enumerate(vals):
+            if v is not None and (best_val is None or v < best_val):
+                best_idx = i
+                best_val = v
+        return best_idx
+
+    def cumsum(self):
+        return Series._from_native(self._native.cumsum())
+
+    def cumprod(self):
+        return Series._from_native(self._native.cumprod())
+
+    def cummax(self):
+        return Series._from_native(self._native.cummax())
+
+    def cummin(self):
+        return Series._from_native(self._native.cummin())
+
+    def sample(self, n=None, frac=None, random_state=None):
+        import random
+        if random_state is not None:
+            random.seed(random_state)
+        total = len(self)
+        if frac is not None:
+            n = int(total * frac)
+        if n is None:
+            n = 1
+        indices = random.sample(range(total), min(n, total))
+        vals = self.tolist()
+        return Series([vals[i] for i in indices], name=self.name)
+
     @property
     def str(self):
         """String accessor for object-dtype Series."""

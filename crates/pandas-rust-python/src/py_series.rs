@@ -543,6 +543,30 @@ impl PySeries {
     }
 
     #[pymethod]
+    fn cumsum(&self, vm: &VirtualMachine) -> PyResult<PySeries> {
+        let col = math::cumsum(self.inner.column()).map_err(|e| pandas_err(e, vm))?;
+        Ok(PySeries::from_core(Series::new(col)))
+    }
+
+    #[pymethod]
+    fn cumprod(&self, vm: &VirtualMachine) -> PyResult<PySeries> {
+        let col = math::cumprod(self.inner.column()).map_err(|e| pandas_err(e, vm))?;
+        Ok(PySeries::from_core(Series::new(col)))
+    }
+
+    #[pymethod]
+    fn cummax(&self, vm: &VirtualMachine) -> PyResult<PySeries> {
+        let col = math::cummax(self.inner.column()).map_err(|e| pandas_err(e, vm))?;
+        Ok(PySeries::from_core(Series::new(col)))
+    }
+
+    #[pymethod]
+    fn cummin(&self, vm: &VirtualMachine) -> PyResult<PySeries> {
+        let col = math::cummin(self.inner.column()).map_err(|e| pandas_err(e, vm))?;
+        Ok(PySeries::from_core(Series::new(col)))
+    }
+
+    #[pymethod]
     fn any(&self, _vm: &VirtualMachine) -> bool {
         math::any_col(self.inner.column())
     }

@@ -79,6 +79,12 @@ class _LocIndexer:
         raise TypeError("Invalid loc key type: {}".format(type(key)))
 
 
+class _ColumnIndex(list):
+    """A list subclass with .tolist() for pandas compatibility."""
+    def tolist(self):
+        return list(self)
+
+
 class _RangeIndex:
     """Thin Python wrapper around native PyIndex to support len() and iteration."""
 
@@ -182,10 +188,13 @@ class DataFrame:
 
     @property
     def columns(self):
-        return self._native.columns
+        return _ColumnIndex(self._native.columns)
 
     def __len__(self):
         return self._native.shape[0]
+
+    def __iter__(self):
+        return iter(self.columns)
 
     def __repr__(self):
         return repr(self._native)
@@ -490,6 +499,67 @@ class DataFrame:
     def applymap(self, func):
         """Apply function element-wise."""
         return DataFrame._from_native(self._native.applymap(func))
+
+    # --- Comparison operators ---
+    def _cmp_op(self, other, op):
+        result = {}
+        for col in self.columns:
+            result[col] = getattr(self[col], op)(other[col] if isinstance(other, DataFrame) else other).tolist()
+        return DataFrame(result)
+
+    def __eq__(self, other):
+        return self._cmp_op(other, '__eq__')
+
+    def __ne__(self, other):
+        return self._cmp_op(other, '__ne__')
+
+    def __lt__(self, other):
+        return self._cmp_op(other, '__lt__')
+
+    def __le__(self, other):
+        return self._cmp_op(other, '__le__')
+
+    def __gt__(self, other):
+        return self._cmp_op(other, '__gt__')
+
+    def __ge__(self, other):
+        return self._cmp_op(other, '__ge__')
+
+    # --- sample ---
+    def sample(self, n=None, frac=None, random_state=None):
+        import random
+        if random_state is not None:
+            random.seed(random_state)
+        total = len(self)
+        if frac is not None:
+            n = int(total * frac)
+        if n is None:
+            n = 1
+        indices = random.sample(range(total), min(n, total))
+        return self._take_rows(indices)
+
+    # --- corr ---
+    def corr(self):
+        import math
+        numeric_cols = [c for c in self.columns if self.dtypes[c] in ("int64", "float64")]
+        n = len(self)
+        result = {}
+        for c1 in numeric_cols:
+            vals1 = self[c1].tolist()
+            mean1 = sum(v for v in vals1 if v is not None) / n
+            row = []
+            for c2 in numeric_cols:
+                vals2 = self[c2].tolist()
+                mean2 = sum(v for v in vals2 if v is not None) / n
+                cov = sum((v1 - mean1) * (v2 - mean2) for v1, v2 in zip(vals1, vals2)) / (n - 1)
+                std1 = math.sqrt(sum((v - mean1) ** 2 for v in vals1) / (n - 1))
+                std2 = math.sqrt(sum((v - mean2) ** 2 for v in vals2) / (n - 1))
+                if std1 == 0 or std2 == 0:
+                    row.append(float('nan'))
+                else:
+                    row.append(cov / (std1 * std2))
+            result[c1] = row
+        return DataFrame(result)
 
     def set_index(self, keys, drop=True):
         """Set the DataFrame index using existing columns."""

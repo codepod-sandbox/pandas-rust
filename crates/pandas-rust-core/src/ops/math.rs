@@ -157,6 +157,266 @@ pub fn all_col(col: &Column) -> bool {
     }
 }
 
+/// Running cumulative sum. Nulls produce null at that position but don't reset accumulator.
+pub fn cumsum(col: &Column) -> Result<Column> {
+    match &col.data {
+        ColumnData::Int64(v) => {
+            let mut acc: i64 = 0;
+            let mut result = Vec::with_capacity(v.len());
+            let mut null_mask = Vec::with_capacity(v.len());
+            let mut any_null = false;
+            for (i, &x) in v.iter().enumerate() {
+                if col.is_null(i) {
+                    null_mask.push(true);
+                    result.push(0i64);
+                    any_null = true;
+                } else {
+                    acc += x;
+                    result.push(acc);
+                    null_mask.push(false);
+                }
+            }
+            if any_null {
+                Column::new_with_nulls(col.name(), ColumnData::Int64(result), null_mask)
+            } else {
+                Ok(Column::new(col.name(), ColumnData::Int64(result)))
+            }
+        }
+        ColumnData::Float64(v) => {
+            let mut acc: f64 = 0.0;
+            let mut result = Vec::with_capacity(v.len());
+            let mut null_mask = Vec::with_capacity(v.len());
+            let mut any_null = false;
+            for (i, &x) in v.iter().enumerate() {
+                if col.is_null(i) {
+                    null_mask.push(true);
+                    result.push(0.0f64);
+                    any_null = true;
+                } else {
+                    acc += x;
+                    result.push(acc);
+                    null_mask.push(false);
+                }
+            }
+            if any_null {
+                Column::new_with_nulls(col.name(), ColumnData::Float64(result), null_mask)
+            } else {
+                Ok(Column::new(col.name(), ColumnData::Float64(result)))
+            }
+        }
+        _ => Err(PandasError::TypeError(format!(
+            "cumsum not supported for dtype {:?}",
+            col.dtype()
+        ))),
+    }
+}
+
+/// Running cumulative product. Nulls produce null at that position but don't reset accumulator.
+pub fn cumprod(col: &Column) -> Result<Column> {
+    match &col.data {
+        ColumnData::Int64(v) => {
+            let mut acc: i64 = 1;
+            let mut result = Vec::with_capacity(v.len());
+            let mut null_mask = Vec::with_capacity(v.len());
+            let mut any_null = false;
+            for (i, &x) in v.iter().enumerate() {
+                if col.is_null(i) {
+                    null_mask.push(true);
+                    result.push(0i64);
+                    any_null = true;
+                } else {
+                    acc *= x;
+                    result.push(acc);
+                    null_mask.push(false);
+                }
+            }
+            if any_null {
+                Column::new_with_nulls(col.name(), ColumnData::Int64(result), null_mask)
+            } else {
+                Ok(Column::new(col.name(), ColumnData::Int64(result)))
+            }
+        }
+        ColumnData::Float64(v) => {
+            let mut acc: f64 = 1.0;
+            let mut result = Vec::with_capacity(v.len());
+            let mut null_mask = Vec::with_capacity(v.len());
+            let mut any_null = false;
+            for (i, &x) in v.iter().enumerate() {
+                if col.is_null(i) {
+                    null_mask.push(true);
+                    result.push(0.0f64);
+                    any_null = true;
+                } else {
+                    acc *= x;
+                    result.push(acc);
+                    null_mask.push(false);
+                }
+            }
+            if any_null {
+                Column::new_with_nulls(col.name(), ColumnData::Float64(result), null_mask)
+            } else {
+                Ok(Column::new(col.name(), ColumnData::Float64(result)))
+            }
+        }
+        _ => Err(PandasError::TypeError(format!(
+            "cumprod not supported for dtype {:?}",
+            col.dtype()
+        ))),
+    }
+}
+
+/// Running cumulative maximum. Nulls produce null at that position but don't reset accumulator.
+pub fn cummax(col: &Column) -> Result<Column> {
+    match &col.data {
+        ColumnData::Int64(v) => {
+            let mut acc: Option<i64> = None;
+            let mut result = Vec::with_capacity(v.len());
+            let mut null_mask = Vec::with_capacity(v.len());
+            let mut any_null = false;
+            for (i, &x) in v.iter().enumerate() {
+                if col.is_null(i) {
+                    null_mask.push(true);
+                    result.push(0i64);
+                    any_null = true;
+                } else {
+                    acc = Some(acc.map_or(x, |a| a.max(x)));
+                    result.push(acc.unwrap());
+                    null_mask.push(false);
+                }
+            }
+            if any_null {
+                Column::new_with_nulls(col.name(), ColumnData::Int64(result), null_mask)
+            } else {
+                Ok(Column::new(col.name(), ColumnData::Int64(result)))
+            }
+        }
+        ColumnData::Float64(v) => {
+            let mut acc: Option<f64> = None;
+            let mut result = Vec::with_capacity(v.len());
+            let mut null_mask = Vec::with_capacity(v.len());
+            let mut any_null = false;
+            for (i, &x) in v.iter().enumerate() {
+                if col.is_null(i) {
+                    null_mask.push(true);
+                    result.push(0.0f64);
+                    any_null = true;
+                } else {
+                    acc = Some(acc.map_or(x, |a| if x > a { x } else { a }));
+                    result.push(acc.unwrap());
+                    null_mask.push(false);
+                }
+            }
+            if any_null {
+                Column::new_with_nulls(col.name(), ColumnData::Float64(result), null_mask)
+            } else {
+                Ok(Column::new(col.name(), ColumnData::Float64(result)))
+            }
+        }
+        ColumnData::Str(v) => {
+            let mut acc: Option<String> = None;
+            let mut result = Vec::with_capacity(v.len());
+            let mut null_mask = Vec::with_capacity(v.len());
+            let mut any_null = false;
+            for (i, x) in v.iter().enumerate() {
+                if col.is_null(i) {
+                    null_mask.push(true);
+                    result.push(String::new());
+                    any_null = true;
+                } else {
+                    acc = Some(acc.as_ref().map_or_else(|| x.clone(), |a| if x > a { x.clone() } else { a.clone() }));
+                    result.push(acc.clone().unwrap());
+                    null_mask.push(false);
+                }
+            }
+            if any_null {
+                Column::new_with_nulls(col.name(), ColumnData::Str(result), null_mask)
+            } else {
+                Ok(Column::new(col.name(), ColumnData::Str(result)))
+            }
+        }
+        _ => Err(PandasError::TypeError(format!(
+            "cummax not supported for dtype {:?}",
+            col.dtype()
+        ))),
+    }
+}
+
+/// Running cumulative minimum. Nulls produce null at that position but don't reset accumulator.
+pub fn cummin(col: &Column) -> Result<Column> {
+    match &col.data {
+        ColumnData::Int64(v) => {
+            let mut acc: Option<i64> = None;
+            let mut result = Vec::with_capacity(v.len());
+            let mut null_mask = Vec::with_capacity(v.len());
+            let mut any_null = false;
+            for (i, &x) in v.iter().enumerate() {
+                if col.is_null(i) {
+                    null_mask.push(true);
+                    result.push(0i64);
+                    any_null = true;
+                } else {
+                    acc = Some(acc.map_or(x, |a| a.min(x)));
+                    result.push(acc.unwrap());
+                    null_mask.push(false);
+                }
+            }
+            if any_null {
+                Column::new_with_nulls(col.name(), ColumnData::Int64(result), null_mask)
+            } else {
+                Ok(Column::new(col.name(), ColumnData::Int64(result)))
+            }
+        }
+        ColumnData::Float64(v) => {
+            let mut acc: Option<f64> = None;
+            let mut result = Vec::with_capacity(v.len());
+            let mut null_mask = Vec::with_capacity(v.len());
+            let mut any_null = false;
+            for (i, &x) in v.iter().enumerate() {
+                if col.is_null(i) {
+                    null_mask.push(true);
+                    result.push(0.0f64);
+                    any_null = true;
+                } else {
+                    acc = Some(acc.map_or(x, |a| if x < a { x } else { a }));
+                    result.push(acc.unwrap());
+                    null_mask.push(false);
+                }
+            }
+            if any_null {
+                Column::new_with_nulls(col.name(), ColumnData::Float64(result), null_mask)
+            } else {
+                Ok(Column::new(col.name(), ColumnData::Float64(result)))
+            }
+        }
+        ColumnData::Str(v) => {
+            let mut acc: Option<String> = None;
+            let mut result = Vec::with_capacity(v.len());
+            let mut null_mask = Vec::with_capacity(v.len());
+            let mut any_null = false;
+            for (i, x) in v.iter().enumerate() {
+                if col.is_null(i) {
+                    null_mask.push(true);
+                    result.push(String::new());
+                    any_null = true;
+                } else {
+                    acc = Some(acc.as_ref().map_or_else(|| x.clone(), |a| if x < a { x.clone() } else { a.clone() }));
+                    result.push(acc.clone().unwrap());
+                    null_mask.push(false);
+                }
+            }
+            if any_null {
+                Column::new_with_nulls(col.name(), ColumnData::Str(result), null_mask)
+            } else {
+                Ok(Column::new(col.name(), ColumnData::Str(result)))
+            }
+        }
+        _ => Err(PandasError::TypeError(format!(
+            "cummin not supported for dtype {:?}",
+            col.dtype()
+        ))),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -249,5 +509,61 @@ mod tests {
     fn test_all_bool_false() {
         let col = Column::new("x", ColumnData::Bool(vec![true, false, true]));
         assert!(!all_col(&col));
+    }
+
+    #[test]
+    fn test_cumsum_int64() {
+        let col = int_col(vec![1, 2, 3, 4]);
+        let result = cumsum(&col).unwrap();
+        match &result.data {
+            ColumnData::Int64(v) => assert_eq!(v, &[1, 3, 6, 10]),
+            _ => panic!("wrong dtype"),
+        }
+    }
+
+    #[test]
+    fn test_cumsum_float64() {
+        let col = float_col(vec![1.0, 2.0, 3.0]);
+        let result = cumsum(&col).unwrap();
+        match &result.data {
+            ColumnData::Float64(v) => assert_eq!(v, &[1.0, 3.0, 6.0]),
+            _ => panic!("wrong dtype"),
+        }
+    }
+
+    #[test]
+    fn test_cumprod_int64() {
+        let col = int_col(vec![1, 2, 3, 4]);
+        let result = cumprod(&col).unwrap();
+        match &result.data {
+            ColumnData::Int64(v) => assert_eq!(v, &[1, 2, 6, 24]),
+            _ => panic!("wrong dtype"),
+        }
+    }
+
+    #[test]
+    fn test_cummax_int64() {
+        let col = int_col(vec![1, 5, 3, 7, 2]);
+        let result = cummax(&col).unwrap();
+        match &result.data {
+            ColumnData::Int64(v) => assert_eq!(v, &[1, 5, 5, 7, 7]),
+            _ => panic!("wrong dtype"),
+        }
+    }
+
+    #[test]
+    fn test_cummin_int64() {
+        let col = int_col(vec![5, 3, 7, 1, 4]);
+        let result = cummin(&col).unwrap();
+        match &result.data {
+            ColumnData::Int64(v) => assert_eq!(v, &[5, 3, 3, 1, 1]),
+            _ => panic!("wrong dtype"),
+        }
+    }
+
+    #[test]
+    fn test_cumsum_error_str() {
+        let col = Column::new("x", ColumnData::Str(vec!["a".into()]));
+        assert!(cumsum(&col).is_err());
     }
 }
