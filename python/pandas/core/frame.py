@@ -55,6 +55,11 @@ class _iLocIndexer:
                     return sub[col_name]
                 elif isinstance(col_key, str):
                     return sub[col_key]
+                elif isinstance(col_key, list):
+                    return {self._df.columns[i]: sub[self._df.columns[i]] for i in col_key}
+                elif isinstance(col_key, slice):
+                    start, stop, step = col_key.indices(len(self._df.columns))
+                    return {self._df.columns[i]: sub[self._df.columns[i]] for i in range(start, stop, step)}
                 raise TypeError("Invalid col key for single-row iloc: {}".format(type(col_key)))
             # sub is a DataFrame
             if isinstance(col_key, int):
@@ -296,6 +301,16 @@ class DataFrame:
         native_cols = list(self._native.columns)
         py_col_keys = [k for k in self._py_cols if k not in native_cols]
         return _ColumnIndex(native_cols + py_col_keys)
+
+    @columns.setter
+    def columns(self, new_columns):
+        """Rename columns in place."""
+        old_cols = list(self._native.columns)
+        if len(new_columns) != len(old_cols):
+            raise ValueError("Length mismatch: expected {} columns, got {}".format(
+                len(old_cols), len(new_columns)))
+        mapping = dict(zip(old_cols, new_columns))
+        self._native = self._native.rename(mapping)
 
     def __len__(self):
         native_rows = self._native.shape[0]

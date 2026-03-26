@@ -71,6 +71,15 @@ class Series:
             values = list(data.values())
             df = _native.DataFrame({col_name: values})
             self._native = df.get_column(col_name)
+        elif isinstance(data, range):
+            col_name = name or "0"
+            df = _native.DataFrame({col_name: list(data)})
+            self._native = df.get_column(col_name)
+        elif hasattr(data, 'tolist'):
+            # numpy array or similar
+            col_name = name or "0"
+            df = _native.DataFrame({col_name: data.tolist()})
+            self._native = df.get_column(col_name)
         elif data is None:
             col_name = name or "0"
             df = _native.DataFrame({col_name: []})
