@@ -357,10 +357,169 @@ class Series:
         vals = self.tolist()
         return Series([vals[i] for i in indices], name=self.name)
 
+    def diff(self, periods=1):
+        """Difference between consecutive elements."""
+        return Series._from_native(self._native.diff(periods))
+
+    def pct_change(self, periods=1):
+        """Percentage change between current and prior element."""
+        shifted = self.shift(periods)
+        curr = self.tolist()
+        prev = shifted.tolist()
+        result = []
+        for c, p in zip(curr, prev):
+            if c is None or p is None or p == 0:
+                result.append(None)
+            else:
+                result.append((c - p) / p)
+        return Series(result, name=self.name)
+
+    def rank(self, method="average", ascending=True):
+        """Rank values. Null values get null rank."""
+        return Series._from_native(self._native.rank(method, ascending))
+
+    def round(self, decimals=0):
+        """Round float values to given number of decimal places."""
+        return Series._from_native(self._native.round(decimals))
+
+    def rolling(self, window):
+        """Return a _Rolling object for window calculations."""
+        return _Rolling(self, window)
+
+    def expanding(self):
+        """Return an _Expanding object for expanding window calculations."""
+        return _Expanding(self)
+
     @property
     def str(self):
         """String accessor for object-dtype Series."""
         return _StringAccessor(self)
+
+
+class _Rolling:
+    """Rolling window calculations."""
+
+    def __init__(self, series, window):
+        self._series = series
+        self._window = window
+
+    def mean(self):
+        vals = self._series.tolist()
+        n = len(vals)
+        w = self._window
+        result = [None] * (w - 1)
+        for i in range(w - 1, n):
+            window_vals = [v for v in vals[i - w + 1:i + 1] if v is not None]
+            if window_vals:
+                result.append(sum(window_vals) / len(window_vals))
+            else:
+                result.append(None)
+        return Series(result, name=self._series.name)
+
+    def sum(self):
+        vals = self._series.tolist()
+        n = len(vals)
+        w = self._window
+        result = [None] * (w - 1)
+        for i in range(w - 1, n):
+            window_vals = [v for v in vals[i - w + 1:i + 1] if v is not None]
+            result.append(sum(window_vals) if window_vals else None)
+        return Series(result, name=self._series.name)
+
+    def min(self):
+        vals = self._series.tolist()
+        n = len(vals)
+        w = self._window
+        result = [None] * (w - 1)
+        for i in range(w - 1, n):
+            window_vals = [v for v in vals[i - w + 1:i + 1] if v is not None]
+            result.append(min(window_vals) if window_vals else None)
+        return Series(result, name=self._series.name)
+
+    def max(self):
+        vals = self._series.tolist()
+        n = len(vals)
+        w = self._window
+        result = [None] * (w - 1)
+        for i in range(w - 1, n):
+            window_vals = [v for v in vals[i - w + 1:i + 1] if v is not None]
+            result.append(max(window_vals) if window_vals else None)
+        return Series(result, name=self._series.name)
+
+    def std(self):
+        import math as _math
+        vals = self._series.tolist()
+        n = len(vals)
+        w = self._window
+        result = [None] * (w - 1)
+        for i in range(w - 1, n):
+            window_vals = [v for v in vals[i - w + 1:i + 1] if v is not None]
+            if len(window_vals) < 2:
+                result.append(None)
+            else:
+                m = sum(window_vals) / len(window_vals)
+                variance = sum((v - m) ** 2 for v in window_vals) / (len(window_vals) - 1)
+                result.append(_math.sqrt(variance))
+        return Series(result, name=self._series.name)
+
+    def count(self):
+        vals = self._series.tolist()
+        n = len(vals)
+        w = self._window
+        result = [None] * (w - 1)
+        for i in range(w - 1, n):
+            window_vals = [v for v in vals[i - w + 1:i + 1] if v is not None]
+            result.append(float(len(window_vals)))
+        return Series(result, name=self._series.name)
+
+
+class _Expanding:
+    """Expanding window calculations."""
+
+    def __init__(self, series):
+        self._series = series
+
+    def sum(self):
+        vals = self._series.tolist()
+        result = []
+        running = 0
+        for v in vals:
+            if v is not None:
+                running += v
+            result.append(running)
+        return Series(result, name=self._series.name)
+
+    def mean(self):
+        vals = self._series.tolist()
+        result = []
+        running = 0
+        count = 0
+        for v in vals:
+            if v is not None:
+                running += v
+                count += 1
+            result.append(running / count if count > 0 else None)
+        return Series(result, name=self._series.name)
+
+    def min(self):
+        vals = self._series.tolist()
+        result = []
+        current_min = None
+        for v in vals:
+            if v is not None:
+                current_min = v if current_min is None else min(current_min, v)
+            result.append(current_min)
+        return Series(result, name=self._series.name)
+
+    def max(self):
+        vals = self._series.tolist()
+        result = []
+        current_max = None
+        for v in vals:
+            if v is not None:
+                current_max = v if current_max is None else max(current_max, v)
+            result.append(current_max)
+        return Series(result, name=self._series.name)
 
 
 class _StringAccessor:

@@ -834,6 +834,27 @@ impl PyDataFrame {
         Ok(PyDataFrame::from_core(df))
     }
 
+    #[pymethod]
+    fn round(
+        &self,
+        decimals: vm::function::OptionalArg<i32>,
+        vm: &VirtualMachine,
+    ) -> PyResult<PyDataFrame> {
+        let d = decimals.unwrap_or(0);
+        let mut cols = Vec::new();
+        for (_, col) in self.inner().iter_columns() {
+            let new_col = match col.dtype() {
+                DType::Int64 | DType::Float64 => {
+                    math::round_column(col, d).map_err(|e| pandas_err(e, vm))?
+                }
+                _ => col.clone(),
+            };
+            cols.push(new_col);
+        }
+        let df = DataFrame::from_columns(cols).map_err(|e| pandas_err(e, vm))?;
+        Ok(PyDataFrame::from_core(df))
+    }
+
     // --- nlargest ---
 
     #[pymethod]

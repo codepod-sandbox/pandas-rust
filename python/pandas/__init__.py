@@ -63,3 +63,28 @@ def to_numeric(arg, errors="raise"):
         if errors == "raise":
             raise
         return float("nan")
+
+
+def melt(frame, id_vars=None, value_vars=None, var_name="variable", value_name="value"):
+    """Unpivot a DataFrame from wide to long format."""
+    if id_vars is None:
+        id_vars = []
+    if isinstance(id_vars, str):
+        id_vars = [id_vars]
+    if value_vars is None:
+        value_vars = [c for c in frame.columns if c not in id_vars]
+    if isinstance(value_vars, str):
+        value_vars = [value_vars]
+
+    result = {v: [] for v in id_vars}
+    result[var_name] = []
+    result[value_name] = []
+
+    n = len(frame)
+    for val_col in value_vars:
+        for id_col in id_vars:
+            result[id_col].extend(frame[id_col].tolist())
+        result[var_name].extend([val_col] * n)
+        result[value_name].extend(frame[val_col].tolist())
+
+    return DataFrame(result)

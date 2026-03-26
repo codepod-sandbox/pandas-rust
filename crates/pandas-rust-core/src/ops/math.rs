@@ -540,6 +540,233 @@ pub fn shift_column(col: &Column, periods: i64) -> Column {
     }
 }
 
+/// Difference between consecutive elements: result[i] = col[i] - col[i - periods].
+/// First `periods` elements (or last `|periods|` for negative) become null.
+/// Works for Int64 (result stays Int64) and Float64. TypeError for Str/Bool.
+pub fn diff_column(col: &Column, periods: i64) -> Result<Column> {
+    let n = col.len();
+    let abs_p = periods.unsigned_abs() as usize;
+
+    match &col.data {
+        ColumnData::Int64(v) => {
+            let mut result = vec![0i64; n];
+            let mut null_mask = vec![false; n];
+            if periods >= 0 {
+                let p = abs_p;
+                for i in 0..p.min(n) { null_mask[i] = true; }
+                for i in p..n {
+                    if col.is_null(i) || col.is_null(i - p) {
+                        null_mask[i] = true;
+                    } else {
+                        result[i] = v[i] - v[i - p];
+                    }
+                }
+            } else {
+                let p = abs_p;
+                for i in n.saturating_sub(p)..n { null_mask[i] = true; }
+                for i in 0..(n.saturating_sub(p)) {
+                    if col.is_null(i) || col.is_null(i + p) {
+                        null_mask[i] = true;
+                    } else {
+                        result[i] = v[i + p] - v[i];
+                    }
+                }
+            }
+            if null_mask.iter().any(|&b| b) {
+                Column::new_with_nulls(col.name(), ColumnData::Int64(result), null_mask)
+            } else {
+                Ok(Column::new(col.name(), ColumnData::Int64(result)))
+            }
+        }
+        ColumnData::Float64(v) => {
+            let mut result = vec![0.0f64; n];
+            let mut null_mask = vec![false; n];
+            if periods >= 0 {
+                let p = abs_p;
+                for i in 0..p.min(n) { null_mask[i] = true; }
+                for i in p..n {
+                    if col.is_null(i) || col.is_null(i - p) {
+                        null_mask[i] = true;
+                    } else {
+                        result[i] = v[i] - v[i - p];
+                    }
+                }
+            } else {
+                let p = abs_p;
+                for i in n.saturating_sub(p)..n { null_mask[i] = true; }
+                for i in 0..(n.saturating_sub(p)) {
+                    if col.is_null(i) || col.is_null(i + p) {
+                        null_mask[i] = true;
+                    } else {
+                        result[i] = v[i + p] - v[i];
+                    }
+                }
+            }
+            if null_mask.iter().any(|&b| b) {
+                Column::new_with_nulls(col.name(), ColumnData::Float64(result), null_mask)
+            } else {
+                Ok(Column::new(col.name(), ColumnData::Float64(result)))
+            }
+        }
+        _ => Err(PandasError::TypeError(format!(
+            "diff not supported for dtype {:?}",
+            col.dtype()
+        ))),
+    }
+}
+
+/// Round Float64 values to `decimals` decimal places. Int64 is a no-op. Null-aware.
+pub fn round_column(col: &Column, decimals: i32) -> Result<Column> {
+    match &col.data {
+        ColumnData::Int64(_) => {
+            // Int64 is already whole numbers — return a clone
+            Ok(col.clone())
+        }
+        ColumnData::Float64(v) => {
+            let factor = 10f64.powi(decimals);
+            let data: Vec<f64> = v
+                .iter()
+                .enumerate()
+                .map(|(i, &x)| {
+                    if col.is_null(i) { x } else { (x * factor).round() / factor }
+                })
+                .collect();
+            if let Some(mask) = &col.null_mask {
+                Column::new_with_nulls(col.name(), ColumnData::Float64(data), mask.clone())
+            } else {
+                Ok(Column::new(col.name(), ColumnData::Float64(data)))
+            }
+        }
+        _ => Err(PandasError::TypeError(format!(
+            "round not supported for dtype {:?}",
+            col.dtype()
+        ))),
+    }
+}
+
+/// Rank method enum.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum RankMethod {
+    Average,
+    Min,
+    Max,
+    First,
+    Dense,
+}
+
+/// Rank values in a column. Null values receive null rank.
+/// Returns a Float64 column (ranks can be fractional with Average method).
+pub fn rank_column(col: &Column, method: RankMethod, ascending: bool) -> Result<Column> {
+    let n = col.len();
+    let mut result = vec![0.0f64; n];
+    let mut null_mask = vec![false; n];
+
+    // Collect non-null indices and their values as f64 for sorting
+    let mut items: Vec<(usize, f64)> = Vec::new();
+    for i in 0..n {
+        if col.is_null(i) {
+            null_mask[i] = true;
+        } else {
+            let val = match &col.data {
+                ColumnData::Int64(v) => v[i] as f64,
+                ColumnData::Float64(v) => v[i],
+                ColumnData::Bool(v) => if v[i] { 1.0 } else { 0.0 },
+                ColumnData::Str(_) => {
+                    return Err(PandasError::TypeError(
+                        "rank not supported for Str dtype".to_string(),
+                    ))
+                }
+            };
+            items.push((i, val));
+        }
+    }
+
+    if items.is_empty() {
+        return Column::new_with_nulls(col.name(), ColumnData::Float64(result), null_mask);
+    }
+
+    // Sort by value (then by original index for First method stability)
+    items.sort_by(|a, b| {
+        let ord = a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal);
+        if !ascending { ord.reverse() } else { ord }.then(a.0.cmp(&b.0))
+    });
+
+    let m = items.len();
+    // Assign ranks (1-based)
+    let mut i = 0;
+    while i < m {
+        // Find end of group with same value
+        let val = items[i].1;
+        let mut j = i + 1;
+        while j < m && (items[j].1 - val).abs() < f64::EPSILON * val.abs().max(1.0) {
+            j += 1;
+        }
+        // items[i..j] is a group of equal values
+        let group_size = j - i;
+        let rank_start = (i + 1) as f64; // 1-based
+        let rank_end = (j) as f64;
+
+        match method {
+            RankMethod::Average => {
+                let avg = (rank_start + rank_end) / 2.0;
+                for k in i..j {
+                    result[items[k].0] = avg;
+                }
+            }
+            RankMethod::Min => {
+                for k in i..j {
+                    result[items[k].0] = rank_start;
+                }
+            }
+            RankMethod::Max => {
+                for k in i..j {
+                    result[items[k].0] = rank_end;
+                }
+            }
+            RankMethod::First => {
+                // Already stable by original index in sort
+                for k in i..j {
+                    result[items[k].0] = (i + 1 + (k - i)) as f64;
+                }
+            }
+            RankMethod::Dense => {
+                // Dense ranks: same value gets same rank, next unique value gets +1
+                // We'll compute dense ranks in a second pass; for now use placeholder
+                // (handled below via second pass)
+                for k in i..j {
+                    result[items[k].0] = rank_start; // will be overwritten
+                }
+            }
+        }
+        i = j;
+        let _ = group_size;
+    }
+
+    // For Dense method, do a proper pass
+    if method == RankMethod::Dense {
+        let mut dense_rank = 1usize;
+        let mut prev_val: Option<f64> = None;
+        // Re-sort by value ascending (or descending) — items is already sorted
+        for k in 0..m {
+            let val = items[k].1;
+            if let Some(pv) = prev_val {
+                if (val - pv).abs() > f64::EPSILON * pv.abs().max(1.0) {
+                    dense_rank += 1;
+                }
+            }
+            result[items[k].0] = dense_rank as f64;
+            prev_val = Some(val);
+        }
+    }
+
+    let any_null = null_mask.iter().any(|&b| b);
+    if any_null {
+        Column::new_with_nulls(col.name(), ColumnData::Float64(result), null_mask)
+    } else {
+        Ok(Column::new(col.name(), ColumnData::Float64(result)))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -758,6 +985,137 @@ mod tests {
             ColumnData::Float64(v) => {
                 assert_eq!(v[1], 1.0);
                 assert_eq!(v[2], 2.0);
+            }
+            _ => panic!("wrong dtype"),
+        }
+    }
+
+    // --- diff tests ---
+
+    #[test]
+    fn test_diff_int64_periods1() {
+        let col = int_col(vec![1, 3, 6, 10]);
+        let result = diff_column(&col, 1).unwrap();
+        assert!(result.is_null(0));
+        match &result.data {
+            ColumnData::Int64(v) => {
+                assert_eq!(v[1], 2);
+                assert_eq!(v[2], 3);
+                assert_eq!(v[3], 4);
+            }
+            _ => panic!("wrong dtype"),
+        }
+    }
+
+    #[test]
+    fn test_diff_int64_periods2() {
+        let col = int_col(vec![1, 2, 5, 9]);
+        let result = diff_column(&col, 2).unwrap();
+        assert!(result.is_null(0));
+        assert!(result.is_null(1));
+        match &result.data {
+            ColumnData::Int64(v) => {
+                assert_eq!(v[2], 4);
+                assert_eq!(v[3], 7);
+            }
+            _ => panic!("wrong dtype"),
+        }
+    }
+
+    #[test]
+    fn test_diff_float64() {
+        let col = float_col(vec![1.0, 1.5, 3.0]);
+        let result = diff_column(&col, 1).unwrap();
+        assert!(result.is_null(0));
+        match &result.data {
+            ColumnData::Float64(v) => {
+                assert!((v[1] - 0.5).abs() < 1e-10);
+                assert!((v[2] - 1.5).abs() < 1e-10);
+            }
+            _ => panic!("wrong dtype"),
+        }
+    }
+
+    #[test]
+    fn test_diff_str_error() {
+        let col = Column::new("x", ColumnData::Str(vec!["a".into()]));
+        assert!(diff_column(&col, 1).is_err());
+    }
+
+    // --- round tests ---
+
+    #[test]
+    fn test_round_float64_zero_decimals() {
+        let col = float_col(vec![1.4, 1.5, 2.7]);
+        let result = round_column(&col, 0).unwrap();
+        match &result.data {
+            ColumnData::Float64(v) => {
+                assert_eq!(v[0], 1.0);
+                assert_eq!(v[1], 2.0);
+                assert_eq!(v[2], 3.0);
+            }
+            _ => panic!("wrong dtype"),
+        }
+    }
+
+    #[test]
+    fn test_round_float64_two_decimals() {
+        let col = float_col(vec![1.234, 2.675]);
+        let result = round_column(&col, 2).unwrap();
+        match &result.data {
+            ColumnData::Float64(v) => {
+                assert!((v[0] - 1.23).abs() < 1e-10);
+                // 2.675 rounding may vary due to floating point
+            }
+            _ => panic!("wrong dtype"),
+        }
+    }
+
+    #[test]
+    fn test_round_int64_noop() {
+        let col = int_col(vec![1, 2, 3]);
+        let result = round_column(&col, 2).unwrap();
+        match &result.data {
+            ColumnData::Int64(v) => assert_eq!(v, &[1, 2, 3]),
+            _ => panic!("wrong dtype"),
+        }
+    }
+
+    // --- rank tests ---
+
+    #[test]
+    fn test_rank_average_ascending() {
+        let col = int_col(vec![3, 1, 4, 1, 5]);
+        let result = rank_column(&col, RankMethod::Average, true).unwrap();
+        match &result.data {
+            ColumnData::Float64(v) => {
+                // sorted: 1(idx1), 1(idx3), 3(idx0), 4(idx2), 5(idx4)
+                // ranks: 1,3(idx0), 1.5(idx1), 1.5(idx3), 2(idx2), ???
+                // 1->rank1.5, 1->rank1.5, 3->rank3, 4->rank4, 5->rank5
+                assert_eq!(v[0], 3.0); // 3 is rank 3
+                assert_eq!(v[1], 1.5); // first 1 gets avg rank 1.5
+                assert_eq!(v[2], 4.0); // 4 is rank 4
+                assert_eq!(v[3], 1.5); // second 1 gets avg rank 1.5
+                assert_eq!(v[4], 5.0); // 5 is rank 5
+            }
+            _ => panic!("wrong dtype"),
+        }
+    }
+
+    #[test]
+    fn test_rank_with_nulls() {
+        let col = Column::new_with_nulls(
+            "x",
+            ColumnData::Int64(vec![0, 2, 0, 4]),
+            vec![false, false, true, false],
+        ).unwrap();
+        let result = rank_column(&col, RankMethod::Average, true).unwrap();
+        assert!(result.is_null(2));
+        match &result.data {
+            ColumnData::Float64(v) => {
+                assert_eq!(v[0], 1.0);
+                assert_eq!(v[1], 2.0);
+                assert_eq!(v[3], 3.0);
             }
             _ => panic!("wrong dtype"),
         }

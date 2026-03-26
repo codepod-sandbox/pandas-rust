@@ -660,6 +660,63 @@ impl PySeries {
     }
 
     #[pymethod]
+    fn diff(
+        &self,
+        periods: vm::function::OptionalArg<i64>,
+        vm: &VirtualMachine,
+    ) -> PyResult<PySeries> {
+        let p = periods.unwrap_or(1);
+        let col = math::diff_column(self.inner.column(), p).map_err(|e| pandas_err(e, vm))?;
+        Ok(PySeries::from_core(Series::new(col)))
+    }
+
+    #[pymethod]
+    fn round(
+        &self,
+        decimals: vm::function::OptionalArg<i32>,
+        vm: &VirtualMachine,
+    ) -> PyResult<PySeries> {
+        let d = decimals.unwrap_or(0);
+        let col = math::round_column(self.inner.column(), d).map_err(|e| pandas_err(e, vm))?;
+        Ok(PySeries::from_core(Series::new(col)))
+    }
+
+    #[pymethod]
+    fn rank(
+        &self,
+        method: vm::function::OptionalArg<PyObjectRef>,
+        ascending: vm::function::OptionalArg<bool>,
+        vm: &VirtualMachine,
+    ) -> PyResult<PySeries> {
+        use math::RankMethod;
+        use vm::builtins::PyStr;
+        let asc = ascending.unwrap_or(true);
+        let m = match method.into_option() {
+            None => RankMethod::Average,
+            Some(obj) => {
+                if vm.is_none(&obj) {
+                    RankMethod::Average
+                } else if let Some(s) = obj.downcast_ref::<PyStr>() {
+                    match s.as_str() {
+                        "average" => RankMethod::Average,
+                        "min" => RankMethod::Min,
+                        "max" => RankMethod::Max,
+                        "first" => RankMethod::First,
+                        "dense" => RankMethod::Dense,
+                        other => return Err(vm.new_value_error(format!(
+                            "unknown rank method: {}", other
+                        ))),
+                    }
+                } else {
+                    return Err(vm.new_type_error("rank method must be a string".to_owned()));
+                }
+            }
+        };
+        let col = math::rank_column(self.inner.column(), m, asc).map_err(|e| pandas_err(e, vm))?;
+        Ok(PySeries::from_core(Series::new(col)))
+    }
+
+    #[pymethod]
     fn replace(
         &self,
         to_replace: PyObjectRef,

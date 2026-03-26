@@ -619,6 +619,17 @@ class DataFrame:
                     return False
         return True
 
+    def round(self, decimals=0):
+        """Round numeric columns to given decimal places."""
+        return DataFrame._from_native(self._native.round(decimals))
+
+    def nunique(self, axis=0):
+        """Return number of unique values per column as a dict."""
+        result = {}
+        for col in self.columns:
+            result[col] = self[col].nunique()
+        return result
+
     def join(self, other, how="left", **kwargs):
         """Join two DataFrames horizontally (by index)."""
         import pandas as pd
