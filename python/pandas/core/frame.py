@@ -289,9 +289,17 @@ class DataFrame:
     def tail(self, n=5):
         return DataFrame._from_native(self._native.tail(n))
 
-    def sort_values(self, by, ascending=True):
+    def sort_values(self, by, ascending=True, inplace=False, **kwargs):
         # Pass ascending directly (Rust now handles bool, list of bools)
-        return DataFrame._from_native(self._native.sort_values(by, ascending))
+        # Handle empty by list — return copy unchanged
+        if isinstance(by, list) and len(by) == 0:
+            result = self.copy()
+        else:
+            result = DataFrame._from_native(self._native.sort_values(by, ascending))
+        if inplace:
+            self._native = result._native
+            return None
+        return result
 
     def __contains__(self, key):
         return key in self.columns
@@ -380,9 +388,12 @@ class DataFrame:
         result = self._native.duplicated(subset, keep)
         return Series._from_native(result)
 
-    def drop_duplicates(self, subset=None, keep="first"):
-        result = self._native.drop_duplicates(subset, keep)
-        return DataFrame._from_native(result)
+    def drop_duplicates(self, subset=None, keep="first", inplace=False, ignore_index=False):
+        result = DataFrame._from_native(self._native.drop_duplicates(subset, keep))
+        if inplace:
+            self._native = result._native
+            return None
+        return result
 
     # GroupBy & Merge
     def groupby(self, by, sort=True, as_index=True, **kwargs):
@@ -514,6 +525,16 @@ class DataFrame:
     def pipe(self, func, *args, **kwargs):
         """Apply func(self, *args, **kwargs)."""
         return func(self, *args, **kwargs)
+
+    def diff(self, periods=1, axis=0):
+        """Difference between consecutive rows (axis=0) for each numeric column."""
+        from .series import Series
+        if not isinstance(periods, int):
+            raise ValueError("periods must be an integer")
+        result = {}
+        for col in self.columns:
+            result[col] = self[col].diff(periods).tolist()
+        return DataFrame(result, index=self.index)
 
     def abs(self):
         """Return absolute value for numeric columns."""

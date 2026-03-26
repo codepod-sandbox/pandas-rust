@@ -12,6 +12,11 @@ class GroupBy:
     def __repr__(self):
         return repr(self._native)
 
+    def __len__(self):
+        """Return the number of groups."""
+        result = self._wrap(self._native.size())
+        return len(result)
+
     def _wrap(self, result):
         from .frame import DataFrame
         return DataFrame._from_native(result)
