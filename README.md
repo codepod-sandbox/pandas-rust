@@ -2,7 +2,7 @@
 
 A pandas implementation in Rust for Python code running in sandboxed environments (RustPython/WASM).
 
-**1,584 tests passing (`2026-03-26`)**
+**1,745 tests passing (`2026-03-26`)**
 
 ## How it works
 
@@ -26,7 +26,7 @@ Heavy-lifting operations (anything that iterates over data) run in native Rust. 
 |---|---|
 | `cargo test -p pandas-rust-core` | 265 passed |
 | Python integration tests | 72 passed |
-| Pandas compatibility tests (upstream-style) | 1,247 passed, 1 skipped |
+| Pandas compatibility tests (upstream-style) | 1,408 passed, 1 skipped |
 
 ## Architecture
 
