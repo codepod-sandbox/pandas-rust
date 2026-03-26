@@ -177,6 +177,12 @@ class DataFrame:
             for k, v in data.items():
                 if isinstance(v, Series):
                     processed[k] = v.tolist()
+                elif isinstance(v, (int, float, str, bool)):
+                    # Scalar value — broadcast to index length
+                    if index is not None:
+                        processed[k] = [v] * len(index)
+                    else:
+                        processed[k] = [v]
                 else:
                     processed[k] = v
             self._native = _native.DataFrame(processed)
@@ -199,6 +205,16 @@ class DataFrame:
                 for row in data:
                     for k in keys:
                         col_data[k].append(row.get(k, None))
+                self._native = _native.DataFrame(col_data)
+            elif isinstance(data[0], (list, tuple)):
+                # List of lists/tuples — each inner list is a row
+                ncols = len(data[0])
+                if columns is None:
+                    columns = [str(i) for i in range(ncols)]
+                col_data = {c: [] for c in columns}
+                for row in data:
+                    for i, c in enumerate(columns):
+                        col_data[c].append(row[i] if i < len(row) else None)
                 self._native = _native.DataFrame(col_data)
             else:
                 raise TypeError(
@@ -670,7 +686,18 @@ class DataFrame:
 
     def transpose(self):
         """Transpose rows and columns."""
-        return DataFrame._from_native(self._native.transpose())
+        # Pure Python implementation to avoid native transpose bugs
+        nrows = len(self)
+        col_names = list(self.columns)
+        # New columns are "0", "1", ..., "nrows-1"
+        new_col_names = [str(i) for i in range(nrows)]
+        result = {}
+        for new_col_idx in range(nrows):
+            vals = []
+            for old_col in col_names:
+                vals.append(self[old_col].tolist()[new_col_idx])
+            result[new_col_names[new_col_idx]] = vals
+        return DataFrame(result)
 
     @property
     def T(self):
