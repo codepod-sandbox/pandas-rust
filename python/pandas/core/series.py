@@ -840,6 +840,24 @@ class _StringAccessor:
         regex = re.compile(pat)
         return self._series.map(lambda x: bool(regex.match(x)) if isinstance(x, str) else False)
 
+    def swapcase(self):
+        return self._series.map(lambda x: x.swapcase() if isinstance(x, str) else x)
+
+    def fullmatch(self, pat):
+        import re
+        regex = re.compile(pat)
+        return self._series.map(lambda x: bool(regex.fullmatch(x)) if isinstance(x, str) else False)
+
+    def extract(self, pat):
+        import re
+        regex = re.compile(pat)
+        def _extract(x):
+            if not isinstance(x, str):
+                return None
+            m = regex.search(x)
+            return m.group(0) if m else None
+        return self._series.map(_extract)
+
     def pad(self, width, side="left", fillchar=" "):
         if side == "left":
             return self._series.map(lambda x: x.rjust(width, fillchar) if isinstance(x, str) else x)

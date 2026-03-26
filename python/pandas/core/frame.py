@@ -354,16 +354,39 @@ class DataFrame:
         return result
 
     # Aggregations
+    def _row_agg(self, func, name):
+        """Helper for axis=1 (row-wise) aggregation."""
+        from .series import Series
+        numeric_cols = [c for c in self.columns if self.dtypes[c] in ("int64", "float64")]
+        col_vals = {c: self[c].tolist() for c in numeric_cols}
+        n = len(self)
+        vals = []
+        for i in range(n):
+            row = [col_vals[c][i] for c in numeric_cols if col_vals[c][i] is not None]
+            if row:
+                vals.append(func(row))
+            else:
+                vals.append(None)
+        return Series(vals, name=name)
+
     def sum(self, axis=0):
+        if axis == 1:
+            return self._row_agg(sum, "sum")
         return self._native.sum()
 
     def mean(self, axis=0):
+        if axis == 1:
+            return self._row_agg(lambda r: sum(r) / len(r), "mean")
         return self._native.mean()
 
     def min(self, axis=0):
+        if axis == 1:
+            return self._row_agg(min, "min")
         return self._native.min()
 
     def max(self, axis=0):
+        if axis == 1:
+            return self._row_agg(max, "max")
         return self._native.max()
 
     def count(self):
@@ -377,6 +400,50 @@ class DataFrame:
 
     def median(self):
         return self._native.median()
+
+    def cov(self):
+        """Compute pairwise covariance of columns."""
+        numeric_cols = [c for c in self.columns if self.dtypes[c] in ("int64", "float64")]
+        n = len(self)
+        col_vals = {c: self[c].tolist() for c in numeric_cols}
+        means = {c: sum(v for v in col_vals[c] if v is not None) / n for c in numeric_cols}
+        result = {}
+        for c1 in numeric_cols:
+            row = []
+            for c2 in numeric_cols:
+                cov_sum = sum(
+                    (col_vals[c1][i] - means[c1]) * (col_vals[c2][i] - means[c2])
+                    for i in range(n)
+                    if col_vals[c1][i] is not None and col_vals[c2][i] is not None
+                )
+                row.append(cov_sum / (n - 1) if n > 1 else 0.0)
+            result[c1] = row
+        return DataFrame(result)
+
+    def corrwith(self, other):
+        """Compute pairwise correlation with another DataFrame."""
+        import math
+        result = {}
+        for col in self.columns:
+            if col in other.columns:
+                vals1 = self[col].tolist()
+                vals2 = other[col].tolist()
+                n = min(len(vals1), len(vals2))
+                if n < 2:
+                    result[col] = None
+                    continue
+                mean1 = sum(vals1[:n]) / n
+                mean2 = sum(vals2[:n]) / n
+                cov = sum((vals1[i] - mean1) * (vals2[i] - mean2) for i in range(n)) / (n - 1)
+                std1 = math.sqrt(sum((v - mean1) ** 2 for v in vals1[:n]) / (n - 1))
+                std2 = math.sqrt(sum((v - mean2) ** 2 for v in vals2[:n]) / (n - 1))
+                result[col] = cov / (std1 * std2) if std1 > 0 and std2 > 0 else None
+        return result
+
+    @classmethod
+    def from_dict(cls, data, orient="columns"):
+        """Construct DataFrame from dict."""
+        return cls(data)
 
     def describe(self):
         return DataFrame._from_native(self._native.describe())
