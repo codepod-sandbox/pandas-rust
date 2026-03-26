@@ -22,6 +22,22 @@ class _PythonSeries:
     def __repr__(self):
         return "_PythonSeries({})".format(self._data)
 
+    @property
+    def str(self):
+        """String accessor for _PythonSeries (supports list-bearing series)."""
+        return _PythonStringAccessor(self)
+
+
+class _PythonStringAccessor:
+    """String/list accessor for _PythonSeries."""
+
+    def __init__(self, series):
+        self._series = series
+
+    def join(self, sep):
+        result = [sep.join(x) if isinstance(x, list) else x for x in self._series.tolist()]
+        return _PythonSeries(result, name=self._series.name)
+
 
 class Series:
     """One-dimensional labeled array."""
@@ -474,6 +490,36 @@ class Series:
         """String accessor for object-dtype Series."""
         return _StringAccessor(self)
 
+    def cov(self, other):
+        """Compute covariance between this Series and other."""
+        vals1 = self.tolist()
+        vals2 = other.tolist()
+        n = min(len(vals1), len(vals2))
+        if n < 2:
+            return None
+        mean1 = sum(v for v in vals1[:n] if v is not None) / n
+        mean2 = sum(v for v in vals2[:n] if v is not None) / n
+        return sum(
+            (vals1[i] - mean1) * (vals2[i] - mean2)
+            for i in range(n)
+            if vals1[i] is not None and vals2[i] is not None
+        ) / (n - 1)
+
+    def corr(self, other):
+        """Compute Pearson correlation between this Series and other."""
+        import math
+        vals1 = self.tolist()
+        vals2 = other.tolist()
+        n = min(len(vals1), len(vals2))
+        if n < 2:
+            return None
+        mean1 = sum(vals1[:n]) / n
+        mean2 = sum(vals2[:n]) / n
+        cov = sum((vals1[i] - mean1) * (vals2[i] - mean2) for i in range(n)) / (n - 1)
+        std1 = math.sqrt(sum((v - mean1) ** 2 for v in vals1[:n]) / (n - 1))
+        std2 = math.sqrt(sum((v - mean2) ** 2 for v in vals2[:n]) / (n - 1))
+        return cov / (std1 * std2) if std1 > 0 and std2 > 0 else None
+
     def mode(self):
         """Return the most frequent value(s) as a Series."""
         vals = [v for v in self.tolist() if v is not None]
@@ -743,6 +789,17 @@ class _Expanding:
             result.append(current_max)
         return Series(result, name=self._series.name)
 
+    def count(self):
+        """Expanding count of non-null values."""
+        vals = self._series.tolist()
+        result = []
+        running = 0
+        for v in vals:
+            if v is not None:
+                running += 1
+            result.append(running)
+        return Series(result, name=self._series.name)
+
 
 class _StringAccessor:
     """Vectorized string operations for Series."""
@@ -842,6 +899,15 @@ class _StringAccessor:
 
     def swapcase(self):
         return self._series.map(lambda x: x.swapcase() if isinstance(x, str) else x)
+
+    def join(self, sep):
+        """Join list elements with sep for each element."""
+        series = self._series
+        # Handle _PythonSeries (e.g., result of str.split)
+        if isinstance(series, _PythonSeries):
+            result = [sep.join(x) if isinstance(x, list) else x for x in series.tolist()]
+            return _PythonSeries(result, name=series.name)
+        return series.map(lambda x: sep.join(x) if isinstance(x, list) else x)
 
     def fullmatch(self, pat):
         import re

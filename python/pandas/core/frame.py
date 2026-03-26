@@ -392,13 +392,32 @@ class DataFrame:
     def count(self):
         return self._native.count()
 
-    def std(self, ddof=1):
+    def std(self, ddof=1, axis=0):
+        if axis == 1:
+            import math
+            return self._row_agg(
+                lambda r: math.sqrt(sum((x - sum(r) / len(r)) ** 2 for x in r) / (len(r) - 1)) if len(r) > 1 else 0.0,
+                "std",
+            )
         return self._native.std()
 
-    def var(self, ddof=1):
+    def var(self, ddof=1, axis=0):
+        if axis == 1:
+            return self._row_agg(
+                lambda r: sum((x - sum(r) / len(r)) ** 2 for x in r) / (len(r) - 1) if len(r) > 1 else 0.0,
+                "var",
+            )
         return self._native.var()
 
-    def median(self):
+    def median(self, axis=0):
+        if axis == 1:
+            def _median(r):
+                s = sorted(r)
+                n = len(s)
+                if n % 2 == 1:
+                    return s[n // 2]
+                return (s[n // 2 - 1] + s[n // 2]) / 2
+            return self._row_agg(_median, "median")
         return self._native.median()
 
     def cov(self):
@@ -808,6 +827,13 @@ class DataFrame:
 
     def prod(self, axis=0):
         """Return product of numeric values per column."""
+        if axis == 1:
+            def _prod(r):
+                p = 1
+                for v in r:
+                    p *= v
+                return p
+            return self._row_agg(_prod, "prod")
         result = {}
         for col in self.columns:
             try:
@@ -821,6 +847,73 @@ class DataFrame:
         return result
 
     product = prod
+
+    def cumsum(self):
+        """Cumulative sum per column."""
+        result = {}
+        for col in self.columns:
+            try:
+                result[col] = self[col].cumsum().tolist()
+            except TypeError:
+                pass
+        return DataFrame(result)
+
+    def cummax(self):
+        """Cumulative max per column."""
+        result = {}
+        for col in self.columns:
+            try:
+                result[col] = self[col].cummax().tolist()
+            except TypeError:
+                pass
+        return DataFrame(result)
+
+    def cummin(self):
+        """Cumulative min per column."""
+        result = {}
+        for col in self.columns:
+            try:
+                result[col] = self[col].cummin().tolist()
+            except TypeError:
+                pass
+        return DataFrame(result)
+
+    def cumprod(self):
+        """Cumulative product per column."""
+        result = {}
+        for col in self.columns:
+            try:
+                result[col] = self[col].cumprod().tolist()
+            except TypeError:
+                pass
+        return DataFrame(result)
+
+    def shift(self, periods=1):
+        """Shift each column by periods positions."""
+        result = {}
+        for col in self.columns:
+            result[col] = self[col].shift(periods).tolist()
+        return DataFrame(result)
+
+    def pct_change(self, periods=1):
+        """Percentage change per column."""
+        result = {}
+        for col in self.columns:
+            try:
+                result[col] = self[col].pct_change(periods).tolist()
+            except TypeError:
+                pass
+        return DataFrame(result)
+
+    def rank(self, method="average", ascending=True):
+        """Rank values per column."""
+        result = {}
+        for col in self.columns:
+            try:
+                result[col] = self[col].rank(method=method, ascending=ascending).tolist()
+            except TypeError:
+                pass
+        return DataFrame(result)
 
     def reindex(self, columns=None, **kwargs):
         """Reorder/add/drop columns. Missing columns filled with None."""
