@@ -79,6 +79,37 @@ class GroupBy:
             return Series(result_cols[value_cols[0]], name=value_cols[0])
         return DataFrame(result_cols)
 
+    def apply(self, func):
+        """Apply func to each sub-DataFrame group and combine results."""
+        from .frame import DataFrame
+        if self._parent_df is None:
+            raise ValueError("apply requires parent DataFrame")
+
+        # Get group keys from first() aggregation
+        agg_result = self.first()
+        results = []
+        for i in range(len(agg_result)):
+            # Build a boolean mask for this group
+            key_mask = None
+            for by_col in self._by_cols:
+                key_val = agg_result[by_col].tolist()[i]
+                col_mask = self._parent_df[by_col] == key_val
+                if key_mask is None:
+                    key_mask = col_mask
+                else:
+                    key_mask = key_mask & col_mask
+            sub_df = self._parent_df[key_mask]
+            result = func(sub_df)
+            results.append(result)
+
+        if not results:
+            return DataFrame({})
+        if isinstance(results[0], DataFrame):
+            import pandas as _pd
+            return _pd.concat(results)
+        # func returned a scalar per group
+        return DataFrame({"result": results})
+
     def agg(self, func):
         """Aggregate using one or more functions.
 

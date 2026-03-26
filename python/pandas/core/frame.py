@@ -701,6 +701,63 @@ class DataFrame:
         """Apply function element-wise."""
         return DataFrame._from_native(self._native.applymap(func))
 
+    # pandas 2.1+ alias: DataFrame.map is element-wise (was applymap)
+    map = applymap
+
+    def items(self):
+        """Iterate over (column name, Series) pairs."""
+        for col in self.columns:
+            yield col, self[col]
+
+    # deprecated alias
+    iteritems = items
+
+    def prod(self, axis=0):
+        """Return product of numeric values per column."""
+        result = {}
+        for col in self.columns:
+            try:
+                vals = [v for v in self[col].tolist() if v is not None]
+                p = 1
+                for v in vals:
+                    p *= v
+                result[col] = p
+            except TypeError:
+                pass
+        return result
+
+    product = prod
+
+    def reindex(self, columns=None, **kwargs):
+        """Reorder/add/drop columns. Missing columns filled with None."""
+        if columns is not None:
+            data = {}
+            for col in columns:
+                if col in self.columns:
+                    data[col] = self[col].tolist()
+                else:
+                    data[col] = [None] * len(self)
+            return DataFrame(data)
+        return self.copy()
+
+    def eq(self, other):
+        return self._cmp_op(other, '__eq__')
+
+    def ne(self, other):
+        return self._cmp_op(other, '__ne__')
+
+    def lt(self, other):
+        return self._cmp_op(other, '__lt__')
+
+    def le(self, other):
+        return self._cmp_op(other, '__le__')
+
+    def gt(self, other):
+        return self._cmp_op(other, '__gt__')
+
+    def ge(self, other):
+        return self._cmp_op(other, '__ge__')
+
     # --- Comparison operators ---
     def _cmp_op(self, other, op):
         result = {}

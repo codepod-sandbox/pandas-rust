@@ -533,6 +533,65 @@ class Series:
         """Suffix labels (index values) — returns copy of series with same name."""
         return self.copy()
 
+    def items(self):
+        """Iterate over (index, value) pairs."""
+        vals = self.tolist()
+        for i, v in enumerate(vals):
+            yield i, v
+
+    iteritems = items
+
+    @property
+    def is_monotonic_increasing(self):
+        """Return True if values are monotonically non-decreasing."""
+        vals = self.tolist()
+        for i in range(1, len(vals)):
+            if vals[i] is None or vals[i - 1] is None:
+                return False
+            if vals[i] < vals[i - 1]:
+                return False
+        return True
+
+    @property
+    def is_monotonic_decreasing(self):
+        """Return True if values are monotonically non-increasing."""
+        vals = self.tolist()
+        for i in range(1, len(vals)):
+            if vals[i] is None or vals[i - 1] is None:
+                return False
+            if vals[i] > vals[i - 1]:
+                return False
+        return True
+
+    def argmax(self):
+        """Return integer index of the maximum value."""
+        return self.idxmax()
+
+    def argmin(self):
+        """Return integer index of the minimum value."""
+        return self.idxmin()
+
+    def prod(self):
+        """Return product of all non-null values."""
+        vals = [v for v in self.tolist() if v is not None]
+        if not vals:
+            return None
+        p = 1
+        for v in vals:
+            p *= v
+        return p
+
+    product = prod
+
+    def drop(self, labels):
+        """Drop values by integer index position(s)."""
+        if isinstance(labels, int):
+            labels = [labels]
+        label_set = set(labels)
+        vals = self.tolist()
+        new_vals = [v for i, v in enumerate(vals) if i not in label_set]
+        return Series(new_vals, name=self.name)
+
     def reset_index(self, drop=False, name=None):
         """Reset the index of the Series.
 
@@ -744,6 +803,32 @@ class _StringAccessor:
 
     def capitalize(self):
         return self._series.map(lambda x: x.capitalize() if isinstance(x, str) else x)
+
+    def isnumeric(self):
+        return self._series.map(lambda x: x.isnumeric() if isinstance(x, str) else False)
+
+    def isalpha(self):
+        return self._series.map(lambda x: x.isalpha() if isinstance(x, str) else False)
+
+    def isdigit(self):
+        return self._series.map(lambda x: x.isdigit() if isinstance(x, str) else False)
+
+    def isalnum(self):
+        return self._series.map(lambda x: x.isalnum() if isinstance(x, str) else False)
+
+    def isupper(self):
+        return self._series.map(lambda x: x.isupper() if isinstance(x, str) else False)
+
+    def islower(self):
+        return self._series.map(lambda x: x.islower() if isinstance(x, str) else False)
+
+    def count(self, pat):
+        return self._series.map(lambda x: x.count(pat) if isinstance(x, str) else 0)
+
+    def match(self, pat):
+        import re
+        regex = re.compile(pat)
+        return self._series.map(lambda x: bool(regex.match(x)) if isinstance(x, str) else False)
 
     def __repr__(self):
         return "_StringAccessor"
