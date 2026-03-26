@@ -1063,6 +1063,33 @@ class DataFrame:
                             self_vals[i] = other_vals[i]
                     self[col] = self_vals
 
+    def query(self, expr):
+        """Filter rows by a string expression like 'col > 2' or 'a > 1 and b < 5'.
+
+        Supports: col op value, col op col, and/or connectors.
+        """
+        import builtins
+        # Keep 'and'/'or' as-is (Python keywords work fine in eval for booleans)
+        mask = []
+        safe_builtins = {"True": True, "False": False}
+        for i in range(len(self)):
+            row_vars = {col: self[col].tolist()[i] for col in self.columns}
+            try:
+                code = builtins.compile(expr, "<query>", "eval")
+                result = builtins.eval(code, {"__builtins__": safe_builtins}, row_vars)
+                mask.append(bool(result))
+            except Exception:
+                mask.append(False)
+        indices = [i for i, m in enumerate(mask) if m]
+        return self._take_rows(indices)
+
+    def set_axis(self, labels, axis=0):
+        """Set the axis labels. axis=1 renames columns."""
+        if axis == 1 or axis == "columns":
+            mapping = dict(zip(self.columns, labels))
+            return self.rename(columns=mapping)
+        return self.copy()  # axis=0 (index) not fully supported
+
     def fillna(self, value):
         """Fill NA values. value may be scalar or dict mapping column->fill."""
         if isinstance(value, dict):

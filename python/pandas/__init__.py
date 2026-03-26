@@ -65,6 +65,11 @@ def to_numeric(arg, errors="raise"):
         return float("nan")
 
 
+def merge(left, right, on=None, how="inner", left_on=None, right_on=None, suffixes=("_x", "_y")):
+    """Top-level merge function. Equivalent to left.merge(right, ...)."""
+    return left.merge(right, on=on, how=how, left_on=left_on, right_on=right_on, suffixes=suffixes)
+
+
 def melt(frame, id_vars=None, value_vars=None, var_name="variable", value_name="value"):
     """Unpivot a DataFrame from wide to long format."""
     if id_vars is None:

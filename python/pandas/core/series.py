@@ -592,6 +592,16 @@ class Series:
         new_vals = [v for i, v in enumerate(vals) if i not in label_set]
         return Series(new_vals, name=self.name)
 
+    def mask(self, cond, other=None):
+        """Replace values where cond is True with other (opposite of where)."""
+        if isinstance(cond, Series):
+            mask_list = cond.tolist()
+        else:
+            mask_list = list(cond)
+        vals = self.tolist()
+        result = [other if m else v for v, m in zip(vals, mask_list)]
+        return Series(result, name=self.name)
+
     def reset_index(self, drop=False, name=None):
         """Reset the index of the Series.
 
@@ -829,6 +839,38 @@ class _StringAccessor:
         import re
         regex = re.compile(pat)
         return self._series.map(lambda x: bool(regex.match(x)) if isinstance(x, str) else False)
+
+    def pad(self, width, side="left", fillchar=" "):
+        if side == "left":
+            return self._series.map(lambda x: x.rjust(width, fillchar) if isinstance(x, str) else x)
+        elif side == "right":
+            return self._series.map(lambda x: x.ljust(width, fillchar) if isinstance(x, str) else x)
+        elif side == "both":
+            return self._series.map(lambda x: x.center(width, fillchar) if isinstance(x, str) else x)
+        return self._series.map(lambda x: x.rjust(width, fillchar) if isinstance(x, str) else x)
+
+    def center(self, width, fillchar=" "):
+        return self._series.map(lambda x: x.center(width, fillchar) if isinstance(x, str) else x)
+
+    def ljust(self, width, fillchar=" "):
+        return self._series.map(lambda x: x.ljust(width, fillchar) if isinstance(x, str) else x)
+
+    def rjust(self, width, fillchar=" "):
+        return self._series.map(lambda x: x.rjust(width, fillchar) if isinstance(x, str) else x)
+
+    def wrap(self, width):
+        import textwrap
+        return self._series.map(lambda x: "\n".join(textwrap.wrap(x, width)) if isinstance(x, str) else x)
+
+    def repeat(self, repeats):
+        return self._series.map(lambda x: x * repeats if isinstance(x, str) else x)
+
+    def normalize(self, form):
+        import unicodedata
+        return self._series.map(lambda x: unicodedata.normalize(form, x) if isinstance(x, str) else x)
+
+    def encode(self, encoding):
+        raise NotImplementedError("str.encode not supported")
 
     def __repr__(self):
         return "_StringAccessor"

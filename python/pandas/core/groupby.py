@@ -110,6 +110,33 @@ class GroupBy:
         # func returned a scalar per group
         return DataFrame({"result": results})
 
+    def filter(self, func):
+        """Keep groups where func(sub_df) returns True."""
+        from .frame import DataFrame
+        if self._parent_df is None:
+            raise ValueError("filter requires parent DataFrame")
+
+        keep_indices = []
+        agg_result = self.first()
+
+        for i in range(len(agg_result)):
+            key_mask = None
+            for by_col in self._by_cols:
+                key_val = agg_result[by_col].tolist()[i]
+                col_mask = self._parent_df[by_col] == key_val
+                if key_mask is None:
+                    key_mask = col_mask
+                else:
+                    key_mask = key_mask & col_mask
+            sub_df = self._parent_df[key_mask]
+            if func(sub_df):
+                mask_list = key_mask.tolist()
+                for j, m in enumerate(mask_list):
+                    if m:
+                        keep_indices.append(j)
+
+        return self._parent_df._take_rows(sorted(keep_indices))
+
     def agg(self, func):
         """Aggregate using one or more functions.
 
