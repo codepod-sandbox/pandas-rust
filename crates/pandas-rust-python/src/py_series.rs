@@ -5,7 +5,7 @@ use vm::types::{AsNumber, Representable};
 use vm::{Py, PyObject, PyObjectRef, PyPayload, PyResult, VirtualMachine};
 
 use pandas_rust_core::column::ColumnData;
-use pandas_rust_core::ops::{aggregation, arithmetic, comparison, nulls, sort, unique};
+use pandas_rust_core::ops::{aggregation, arithmetic, comparison, math, nulls, sort, unique};
 use pandas_rust_core::{DType, Series};
 
 use crate::py_column::{
@@ -473,6 +473,177 @@ impl PySeries {
         let keep_enum = parse_keep_arg(keep.into_option().as_ref(), vm)?;
         let col = unique::duplicated(self.inner.column(), keep_enum);
         Ok(PySeries::from_core(Series::new(col)))
+    }
+
+    // --- Math ops ---
+
+    #[pymethod]
+    fn abs(&self, vm: &VirtualMachine) -> PyResult<PySeries> {
+        let col = math::abs_column(self.inner.column()).map_err(|e| pandas_err(e, vm))?;
+        Ok(PySeries::from_core(Series::new(col)))
+    }
+
+    #[pymethod]
+    fn clip(
+        &self,
+        lower: vm::function::OptionalArg<PyObjectRef>,
+        upper: vm::function::OptionalArg<PyObjectRef>,
+        vm: &VirtualMachine,
+    ) -> PyResult<PySeries> {
+        let lo = lower
+            .into_option()
+            .filter(|obj| !vm.is_none(obj))
+            .map(|obj| -> PyResult<f64> { obj.try_into_value(vm) })
+            .transpose()?;
+        let hi = upper
+            .into_option()
+            .filter(|obj| !vm.is_none(obj))
+            .map(|obj| -> PyResult<f64> { obj.try_into_value(vm) })
+            .transpose()?;
+        let col = math::clip_column(self.inner.column(), lo, hi).map_err(|e| pandas_err(e, vm))?;
+        Ok(PySeries::from_core(Series::new(col)))
+    }
+
+    #[pymethod]
+    fn isin(&self, values: PyObjectRef, vm: &VirtualMachine) -> PyResult<PySeries> {
+        use vm::builtins::PyList;
+        let list = values
+            .downcast_ref::<PyList>()
+            .ok_or_else(|| vm.new_type_error("isin requires a list".to_owned()))?;
+        let items = list.borrow_vec();
+        let mut scalars = Vec::with_capacity(items.len());
+        for item in items.iter() {
+            scalars.push(pyobj_to_scalar_value(item, vm)?);
+        }
+        let col = math::isin_column(self.inner.column(), &scalars);
+        Ok(PySeries::from_core(Series::new(col)))
+    }
+
+    #[pymethod]
+    fn between(
+        &self,
+        left: PyObjectRef,
+        right: PyObjectRef,
+        _inclusive: vm::function::OptionalArg<PyObjectRef>,
+        vm: &VirtualMachine,
+    ) -> PyResult<PySeries> {
+        // Build left_series >= left AND self <= right
+        let lo_f: f64 = left.try_into_value(vm)?;
+        let hi_f: f64 = right.try_into_value(vm)?;
+        let n = self.inner.len();
+        let lo_vals = vec![lo_f; n];
+        let hi_vals = vec![hi_f; n];
+        use pandas_rust_core::column::ColumnData;
+        let lo_col = pandas_rust_core::Column::new("__lo__", ColumnData::Float64(lo_vals));
+        let hi_col = pandas_rust_core::Column::new("__hi__", ColumnData::Float64(hi_vals));
+        let ge_col = comparison::ge(self.inner.column(), &lo_col).map_err(|e| pandas_err(e, vm))?;
+        let le_col = comparison::le(self.inner.column(), &hi_col).map_err(|e| pandas_err(e, vm))?;
+        let result = comparison::and(&ge_col, &le_col).map_err(|e| pandas_err(e, vm))?;
+        Ok(PySeries::from_core(Series::new(result)))
+    }
+
+    #[pymethod]
+    fn any(&self, _vm: &VirtualMachine) -> bool {
+        math::any_col(self.inner.column())
+    }
+
+    #[pymethod]
+    fn all(&self, _vm: &VirtualMachine) -> bool {
+        math::all_col(self.inner.column())
+    }
+
+    #[pymethod]
+    fn nlargest(&self, n: usize, _vm: &VirtualMachine) -> PySeries {
+        let indices = sort::argsort_column(self.inner.column(), false);
+        let take_n = n.min(indices.len());
+        let taken = &indices[..take_n];
+        let new_col = self
+            .inner
+            .column()
+            .take(taken)
+            .expect("nlargest indices are valid");
+        PySeries::from_core(Series::new(new_col))
+    }
+
+    #[pymethod]
+    fn nsmallest(&self, n: usize, _vm: &VirtualMachine) -> PySeries {
+        let indices = sort::argsort_column(self.inner.column(), true);
+        let take_n = n.min(indices.len());
+        let taken = &indices[..take_n];
+        let new_col = self
+            .inner
+            .column()
+            .take(taken)
+            .expect("nsmallest indices are valid");
+        PySeries::from_core(Series::new(new_col))
+    }
+
+    #[pymethod]
+    fn map(&self, func_or_dict: PyObjectRef, vm: &VirtualMachine) -> PyResult<PySeries> {
+        use vm::builtins::PyDict;
+        // Only support dict mapping
+        let dict = func_or_dict
+            .downcast_ref::<PyDict>()
+            .ok_or_else(|| vm.new_type_error("map only supports dict mapping".to_owned()))?;
+
+        let col = self.inner.column();
+
+        // Collect results as Python objects then build column
+        let mut results: Vec<PyObjectRef> = Vec::with_capacity(col.len());
+        for i in 0..col.len() {
+            let key = column_value_to_pyobj(col, i, vm)?;
+            // Look up key in dict
+            match dict.get_item_opt(&*key, vm)? {
+                Some(val) => results.push(val),
+                None => {
+                    // Missing key -> None/null
+                    results.push(vm.ctx.none());
+                }
+            }
+        }
+
+        // Build column from results
+        use crate::py_column::pyobj_to_column;
+        let list_obj = vm.ctx.new_list(results);
+        let new_col = pyobj_to_column(col.name(), &list_obj.into(), vm)?;
+        Ok(PySeries::from_core(Series::new(new_col)))
+    }
+
+    #[pymethod]
+    fn replace(
+        &self,
+        to_replace: PyObjectRef,
+        value: PyObjectRef,
+        vm: &VirtualMachine,
+    ) -> PyResult<PySeries> {
+        let col = self.inner.column();
+        let find_sv = pyobj_to_scalar_value(&to_replace, vm)?;
+
+        let mut results: Vec<PyObjectRef> = Vec::with_capacity(col.len());
+        for i in 0..col.len() {
+            let matches = if col.is_null(i) {
+                false
+            } else {
+                match (col.data(), &find_sv) {
+                    (ColumnData::Int64(v), nulls::ScalarValue::Int64(t)) => v[i] == *t,
+                    (ColumnData::Float64(v), nulls::ScalarValue::Float64(t)) => v[i] == *t,
+                    (ColumnData::Str(v), nulls::ScalarValue::Str(t)) => v[i] == *t,
+                    (ColumnData::Bool(v), nulls::ScalarValue::Bool(t)) => v[i] == *t,
+                    _ => false,
+                }
+            };
+            if matches {
+                // Emit replacement value
+                results.push(value.clone());
+            } else {
+                results.push(column_value_to_pyobj(col, i, vm)?);
+            }
+        }
+
+        use crate::py_column::pyobj_to_column;
+        let list_obj = vm.ctx.new_list(results);
+        let new_col = pyobj_to_column(col.name(), &list_obj.into(), vm)?;
+        Ok(PySeries::from_core(Series::new(new_col)))
     }
 }
 

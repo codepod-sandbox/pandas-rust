@@ -2,6 +2,7 @@ pub mod aggregation;
 pub mod arithmetic;
 pub mod comparison;
 pub mod filter;
+pub mod math;
 pub mod nulls;
 pub mod sort;
 pub mod unique;

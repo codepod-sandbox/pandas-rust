@@ -215,6 +215,94 @@ impl DataFrame {
     pub fn iter_columns(&self) -> impl Iterator<Item = (&str, &Column)> {
         self.columns.iter().map(|(n, c)| (n.as_str(), c))
     }
+
+    /// Transpose: swap rows and columns.
+    ///
+    /// Column names become row labels (the first column of the result, named "").
+    /// Row indices (0, 1, 2, ...) become new column names.
+    /// All numeric values are promoted to Float64; if any Str column exists, all
+    /// values become Str.
+    pub fn transpose(&self) -> Result<DataFrame> {
+        let nrows = self.nrows();
+        let ncols = self.ncols();
+        if ncols == 0 || nrows == 0 {
+            return Ok(DataFrame::empty());
+        }
+
+        // Determine target dtype
+        let has_str = self.columns.values().any(|c| c.dtype() == DType::Str);
+
+        // Old column names become first column
+        let col_names: Vec<String> = self.columns.keys().cloned().collect();
+
+        // New columns: one per original row, named "0", "1", ...
+        // Plus the first column of old column names (named "")
+        let mut new_cols: Vec<Column> = Vec::with_capacity(nrows + 1);
+
+        // Index column: old column names as strings
+        let idx_col = Column::new("", ColumnData::Str(col_names.clone()));
+        new_cols.push(idx_col);
+
+        // For each old row, build a new column
+        for row_idx in 0..nrows {
+            let new_col_name = row_idx.to_string();
+            if has_str {
+                // Stringify everything
+                let vals: Vec<String> = self
+                    .columns
+                    .values()
+                    .map(|c| {
+                        if c.is_null(row_idx) {
+                            return "".to_string();
+                        }
+                        match c.data() {
+                            ColumnData::Int64(v) => v[row_idx].to_string(),
+                            ColumnData::Float64(v) => v[row_idx].to_string(),
+                            ColumnData::Str(v) => v[row_idx].clone(),
+                            ColumnData::Bool(v) => v[row_idx].to_string(),
+                        }
+                    })
+                    .collect();
+                new_cols.push(Column::new(new_col_name, ColumnData::Str(vals)));
+            } else {
+                // All numeric: promote to Float64
+                let mut null_mask = vec![false; ncols];
+                let mut has_nulls = false;
+                let vals: Vec<f64> = self
+                    .columns
+                    .values()
+                    .enumerate()
+                    .map(|(col_i, c)| {
+                        if c.is_null(row_idx) {
+                            null_mask[col_i] = true;
+                            has_nulls = true;
+                            return f64::NAN;
+                        }
+                        match c.data() {
+                            ColumnData::Int64(v) => v[row_idx] as f64,
+                            ColumnData::Float64(v) => v[row_idx],
+                            ColumnData::Bool(v) => {
+                                if v[row_idx] {
+                                    1.0
+                                } else {
+                                    0.0
+                                }
+                            }
+                            ColumnData::Str(_) => unreachable!(),
+                        }
+                    })
+                    .collect();
+                let col = if has_nulls {
+                    Column::new_with_nulls(new_col_name, ColumnData::Float64(vals), null_mask)?
+                } else {
+                    Column::new(new_col_name, ColumnData::Float64(vals))
+                };
+                new_cols.push(col);
+            }
+        }
+
+        DataFrame::from_columns(new_cols)
+    }
 }
 
 #[cfg(test)]

@@ -8,7 +8,7 @@ use vm::types::{AsMapping, AsSequence, Representable};
 use vm::{Py, PyObjectRef, PyPayload, PyRef, PyResult, VirtualMachine};
 
 use pandas_rust_core::column::{Column, ColumnData};
-use pandas_rust_core::ops::{aggregation, filter, nulls, sort};
+use pandas_rust_core::ops::{aggregation, filter, math, nulls, sort};
 use pandas_rust_core::{DType, DataFrame};
 
 use crate::py_column::{
@@ -726,6 +726,113 @@ impl PyDataFrame {
     #[pygetset]
     fn values(&self, vm: &VirtualMachine) -> PyResult<PyObjectRef> {
         self.to_numpy(vm)
+    }
+
+    // --- abs ---
+
+    #[pymethod]
+    fn abs(&self, vm: &VirtualMachine) -> PyResult<PyDataFrame> {
+        let mut cols = Vec::new();
+        for (_, col) in self.inner().iter_columns() {
+            let new_col = match col.dtype() {
+                DType::Int64 | DType::Float64 => {
+                    math::abs_column(col).map_err(|e| pandas_err(e, vm))?
+                }
+                _ => col.clone(),
+            };
+            cols.push(new_col);
+        }
+        let df = DataFrame::from_columns(cols).map_err(|e| pandas_err(e, vm))?;
+        Ok(PyDataFrame::from_core(df))
+    }
+
+    // --- clip ---
+
+    #[pymethod]
+    fn clip(
+        &self,
+        lower: vm::function::OptionalArg<PyObjectRef>,
+        upper: vm::function::OptionalArg<PyObjectRef>,
+        vm: &VirtualMachine,
+    ) -> PyResult<PyDataFrame> {
+        let lo = lower
+            .into_option()
+            .filter(|obj| !vm.is_none(obj))
+            .map(|obj| -> PyResult<f64> { obj.try_into_value(vm) })
+            .transpose()?;
+        let hi = upper
+            .into_option()
+            .filter(|obj| !vm.is_none(obj))
+            .map(|obj| -> PyResult<f64> { obj.try_into_value(vm) })
+            .transpose()?;
+        let mut cols = Vec::new();
+        for (_, col) in self.inner().iter_columns() {
+            let new_col = match col.dtype() {
+                DType::Int64 | DType::Float64 => {
+                    math::clip_column(col, lo, hi).map_err(|e| pandas_err(e, vm))?
+                }
+                _ => col.clone(),
+            };
+            cols.push(new_col);
+        }
+        let df = DataFrame::from_columns(cols).map_err(|e| pandas_err(e, vm))?;
+        Ok(PyDataFrame::from_core(df))
+    }
+
+    // --- nlargest ---
+
+    #[pymethod]
+    fn nlargest(
+        &self,
+        n: usize,
+        columns: PyObjectRef,
+        vm: &VirtualMachine,
+    ) -> PyResult<PyDataFrame> {
+        let col_name = columns
+            .downcast_ref::<PyStr>()
+            .ok_or_else(|| vm.new_type_error("columns must be a string".to_owned()))?;
+        let df = self.inner();
+        let col = df
+            .get_column(col_name.as_str())
+            .map_err(|e| pandas_err(e, vm))?;
+        let indices = sort::argsort_column(col, false);
+        let take_n = n.min(indices.len());
+        let sub = df
+            .take_rows(&indices[..take_n])
+            .map_err(|e| pandas_err(e, vm))?;
+        Ok(PyDataFrame::from_core(sub))
+    }
+
+    // --- nsmallest ---
+
+    #[pymethod]
+    fn nsmallest(
+        &self,
+        n: usize,
+        columns: PyObjectRef,
+        vm: &VirtualMachine,
+    ) -> PyResult<PyDataFrame> {
+        let col_name = columns
+            .downcast_ref::<PyStr>()
+            .ok_or_else(|| vm.new_type_error("columns must be a string".to_owned()))?;
+        let df = self.inner();
+        let col = df
+            .get_column(col_name.as_str())
+            .map_err(|e| pandas_err(e, vm))?;
+        let indices = sort::argsort_column(col, true);
+        let take_n = n.min(indices.len());
+        let sub = df
+            .take_rows(&indices[..take_n])
+            .map_err(|e| pandas_err(e, vm))?;
+        Ok(PyDataFrame::from_core(sub))
+    }
+
+    // --- transpose ---
+
+    #[pymethod]
+    fn transpose(&self, vm: &VirtualMachine) -> PyResult<PyDataFrame> {
+        let result = self.inner().transpose().map_err(|e| pandas_err(e, vm))?;
+        Ok(PyDataFrame::from_core(result))
     }
 }
 

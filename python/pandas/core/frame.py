@@ -214,3 +214,80 @@ class DataFrame:
             for col_name, dt in dtypes_info.items():
                 print(" {}    {} non-null    {}".format(col_name, nrows, dt))
         print("dtypes: {} columns".format(self.shape[1]))
+
+    def reset_index(self, drop=True):
+        """Reset index to RangeIndex. drop=True is always assumed for v1."""
+        return self.copy()
+
+    def select_dtypes(self, include=None, exclude=None):
+        """Filter columns by dtype string."""
+        dtypes_info = self.dtypes
+        keep = []
+        for col_name, dt in dtypes_info.items():
+            # Normalize dtype to category
+            if dt in ("int64",):
+                cats = {"number", "numeric", "int64", "integer", "int"}
+            elif dt in ("float64",):
+                cats = {"number", "numeric", "float64", "float", "floating"}
+            elif dt in ("object", "str"):
+                cats = {"object", "str", "string"}
+            elif dt in ("bool",):
+                cats = {"bool", "boolean"}
+            else:
+                cats = {dt}
+
+            if include is not None:
+                inc = [include] if isinstance(include, str) else list(include)
+                if not any(i in cats for i in inc):
+                    continue
+            if exclude is not None:
+                exc = [exclude] if isinstance(exclude, str) else list(exclude)
+                if any(e in cats for e in exc):
+                    continue
+            keep.append(col_name)
+
+        return self[keep] if keep else DataFrame._from_native(self._native.head(0))
+
+    def nlargest(self, n, columns):
+        """Return the n rows with the largest values in the given column."""
+        return DataFrame._from_native(self._native.nlargest(n, columns))
+
+    def nsmallest(self, n, columns):
+        """Return the n rows with the smallest values in the given column."""
+        return DataFrame._from_native(self._native.nsmallest(n, columns))
+
+    def assign(self, **kwargs):
+        """Return a new DataFrame with new columns added."""
+        result = self.copy()
+        for col_name, value in kwargs.items():
+            if callable(value):
+                value = value(result)
+            from .series import Series
+            if isinstance(value, Series):
+                result[col_name] = value.tolist()
+            else:
+                result[col_name] = value
+        return result
+
+    def pipe(self, func, *args, **kwargs):
+        """Apply func(self, *args, **kwargs)."""
+        return func(self, *args, **kwargs)
+
+    def abs(self):
+        """Return absolute value for numeric columns."""
+        return DataFrame._from_native(self._native.abs())
+
+    def clip(self, lower=None, upper=None):
+        """Clip values to [lower, upper]."""
+        lo = float(lower) if lower is not None else None
+        hi = float(upper) if upper is not None else None
+        return DataFrame._from_native(self._native.clip(lo, hi))
+
+    def transpose(self):
+        """Transpose rows and columns."""
+        return DataFrame._from_native(self._native.transpose())
+
+    @property
+    def T(self):
+        """Transpose property."""
+        return self.transpose()
