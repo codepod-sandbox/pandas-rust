@@ -34,6 +34,46 @@ class GroupBy:
             return _ColumnGroupBy(self, [key])
         return _ColumnGroupBy(self, list(key))
 
+    def transform(self, func):
+        """Broadcast aggregated values back to the original DataFrame length.
+
+        Parameters
+        ----------
+        func : str
+            Name of an aggregation function (e.g. "sum", "mean").
+        """
+        from .frame import DataFrame
+        from .series import Series
+        if self._parent_df is None:
+            raise ValueError("transform requires parent DataFrame reference")
+
+        agg_result = getattr(self, func)()  # returns a DataFrame indexed by group keys
+
+        # Determine value columns (all columns except the by_cols)
+        value_cols = [c for c in self._parent_df.columns if c not in self._by_cols]
+
+        # Build lookup: tuple of key values -> dict of {value_col: agg_val}
+        agg_key_lists = [agg_result[bc].tolist() for bc in self._by_cols]
+        lookup = {}
+        n_groups = len(agg_result)
+        for i in range(n_groups):
+            key = tuple(agg_key_lists[bi][i] for bi in range(len(self._by_cols)))
+            lookup[key] = {c: agg_result[c].tolist()[i] for c in value_cols}
+
+        # Map each original row to its group's aggregated value
+        parent_key_lists = [self._parent_df[bc].tolist() for bc in self._by_cols]
+        n = len(self._parent_df)
+        result_cols = {c: [] for c in value_cols}
+        for i in range(n):
+            key = tuple(parent_key_lists[bi][i] for bi in range(len(self._by_cols)))
+            group_vals = lookup.get(key, {c: None for c in value_cols})
+            for c in value_cols:
+                result_cols[c].append(group_vals.get(c))
+
+        if len(value_cols) == 1:
+            return Series(result_cols[value_cols[0]], name=value_cols[0])
+        return DataFrame(result_cols)
+
     def agg(self, func):
         """Aggregate using one or more functions.
 

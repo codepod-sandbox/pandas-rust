@@ -352,7 +352,21 @@ class DataFrame:
     def fillna(self, value):
         return DataFrame._from_native(self._native.fillna(value))
 
-    def dropna(self, how="any", **kwargs):
+    def dropna(self, how="any", subset=None, **kwargs):
+        if subset is not None:
+            # Filter using Python logic on the specified subset of columns
+            if isinstance(subset, str):
+                subset = [subset]
+            indices = []
+            for i in range(len(self)):
+                row = self.iloc[i]
+                if how == "any":
+                    if all(row.get(col) is not None for col in subset):
+                        indices.append(i)
+                else:  # "all"
+                    if any(row.get(col) is not None for col in subset):
+                        indices.append(i)
+            return self._take_rows(indices)
         return DataFrame._from_native(self._native.dropna(how))
 
     def isna(self):
@@ -700,6 +714,9 @@ class DataFrame:
                 col_results = []
                 for f in func:
                     val = getattr(self[col], f)()
+                    # Coerce all numeric results to float for type uniformity
+                    if isinstance(val, int) and not isinstance(val, bool):
+                        val = float(val)
                     col_results.append(val)
                 result[col] = col_results
             return DataFrame(result)
@@ -722,3 +739,108 @@ class DataFrame:
         if isinstance(other, DataFrame):
             return pd.concat([self, other], axis=1)
         raise TypeError("Can only join DataFrame objects")
+
+    # --- Arithmetic operators ---
+    def _arith_op(self, other, op):
+        """Apply element-wise arithmetic between two DataFrames or DataFrame and scalar."""
+        result = {}
+        if isinstance(other, DataFrame):
+            for col in self.columns:
+                result[col] = getattr(self[col], op)(other[col]).tolist()
+        else:
+            for col in self.columns:
+                result[col] = getattr(self[col], op)(other).tolist()
+        return DataFrame(result)
+
+    def __add__(self, other):
+        return self._arith_op(other, '__add__')
+
+    def __sub__(self, other):
+        return self._arith_op(other, '__sub__')
+
+    def __mul__(self, other):
+        return self._arith_op(other, '__mul__')
+
+    def __truediv__(self, other):
+        return self._arith_op(other, '__truediv__')
+
+    def __radd__(self, other):
+        return self._arith_op(other, '__radd__')
+
+    def __rmul__(self, other):
+        return self._arith_op(other, '__rmul__')
+
+    def mask(self, cond, other=None):
+        """Replace values where cond is True with other (opposite of where)."""
+        from .series import Series
+        if isinstance(cond, Series):
+            mask_vals = cond.tolist()
+            result = {}
+            for col in self.columns:
+                vals = self[col].tolist()
+                result[col] = [other if m else v for v, m in zip(vals, mask_vals)]
+            return DataFrame(result)
+        elif isinstance(cond, DataFrame):
+            result = {}
+            for col in self.columns:
+                cond_vals = cond[col].tolist()
+                vals = self[col].tolist()
+                result[col] = [other if m else v for v, m in zip(vals, cond_vals)]
+            return DataFrame(result)
+        else:
+            mask_vals = list(cond)
+            result = {}
+            for col in self.columns:
+                vals = self[col].tolist()
+                result[col] = [other if m else v for v, m in zip(vals, mask_vals)]
+            return DataFrame(result)
+
+    def any(self, axis=0):
+        """Return True for each column if any value is truthy."""
+        from .series import Series
+        result = {}
+        for col in self.columns:
+            result[col] = [any(v for v in self[col].tolist() if v is not None)]
+        if axis == 0:
+            return Series([any(v for v in self[col].tolist() if v is not None) for col in self.columns],
+                          name=None)
+        return Series([any(v for v in self.iloc[i].values() if v) for i in range(len(self))],
+                      name=None)
+
+    def all(self, axis=0):
+        """Return True for each column if all values are truthy."""
+        from .series import Series
+        if axis == 0:
+            return Series([all(bool(v) for v in self[col].tolist() if v is not None) for col in self.columns],
+                          name=None)
+        return Series([all(bool(v) for v in self.iloc[i].values()) for i in range(len(self))],
+                      name=None)
+
+    def update(self, other):
+        """Modify in-place using non-NA values from another DataFrame (aligned by index/column)."""
+        if isinstance(other, DataFrame):
+            for col in other.columns:
+                if col in self.columns:
+                    other_vals = other[col].tolist()
+                    self_vals = self[col].tolist()
+                    n = min(len(self_vals), len(other_vals))
+                    for i in range(n):
+                        if other_vals[i] is not None:
+                            self_vals[i] = other_vals[i]
+                    self[col] = self_vals
+
+    def fillna(self, value):
+        """Fill NA values. value may be scalar or dict mapping column->fill."""
+        if isinstance(value, dict):
+            result = self.copy()
+            for col, fill_val in value.items():
+                if col in result.columns:
+                    # Coerce int fill to float if the column dtype is float
+                    col_dtype = result.dtypes.get(col, "") if isinstance(result.dtypes, dict) else ""
+                    if col_dtype == "float64" and isinstance(fill_val, int) and not isinstance(fill_val, bool):
+                        fill_val = float(fill_val)
+                    vals = result[col].tolist()
+                    filled = [fill_val if v is None else v for v in vals]
+                    result[col] = filled
+            return result
+        return DataFrame._from_native(self._native.fillna(value))

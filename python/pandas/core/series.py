@@ -430,6 +430,33 @@ class Series:
         """String accessor for object-dtype Series."""
         return _StringAccessor(self)
 
+    def mode(self):
+        """Return the most frequent value(s) as a Series."""
+        vals = [v for v in self.tolist() if v is not None]
+        if not vals:
+            return Series([], name=self.name)
+        counts = {}
+        for v in vals:
+            counts[v] = counts.get(v, 0) + 1
+        max_count = max(counts.values())
+        modes = sorted(v for v, c in counts.items() if c == max_count)
+        return Series(modes, name=self.name)
+
+    def reset_index(self, drop=False, name=None):
+        """Reset the index of the Series.
+
+        If drop=True, just return a new Series with RangeIndex.
+        If drop=False, return a DataFrame with the old index as a column plus values.
+        """
+        from .frame import DataFrame
+        series_name = name if name is not None else (self.name if self.name is not None else 0)
+        vals = self.tolist()
+        if drop:
+            return Series(vals, name=self.name)
+        # Return a DataFrame with "index" column and the series values column
+        index_col = list(range(len(vals)))
+        return DataFrame({"index": index_col, series_name: vals})
+
 
 class _Rolling:
     """Rolling window calculations."""
