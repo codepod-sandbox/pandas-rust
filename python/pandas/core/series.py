@@ -191,8 +191,15 @@ class Series:
 
     # --- New methods ---
 
+    def apply(self, func):
+        """Apply function element-wise, returning a new Series."""
+        results = self._native.apply(func)
+        return Series(results)
+
     def map(self, func_or_dict):
-        """Apply dict mapping element-wise. Only dict supported in v1."""
+        """Map values using dict or callable."""
+        if callable(func_or_dict):
+            return self.apply(func_or_dict)
         return Series._from_native(self._native.map(func_or_dict))
 
     def replace(self, to_replace, value):

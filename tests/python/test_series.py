@@ -106,3 +106,19 @@ def test_duplicated_keep_last():
     s = pd.Series([1, 2, 1], name="x")
     d = s.duplicated(keep="last")
     assert d.tolist() == [True, False, False]
+
+
+# ---------------------------------------------------------------------------
+# apply / map (callable)
+# ---------------------------------------------------------------------------
+
+def test_series_apply():
+    s = pd.Series([1, 2, 3], name="x")
+    result = s.apply(lambda x: x * 10)
+    assert result.tolist() == [10, 20, 30]
+
+
+def test_series_map_callable():
+    s = pd.Series([1, 2, 3], name="x")
+    result = s.map(lambda x: x + 100)
+    assert result.tolist() == [101, 102, 103]

@@ -291,3 +291,27 @@ class DataFrame:
     def T(self):
         """Transpose property."""
         return self.transpose()
+
+    def iterrows(self):
+        """Iterate over rows as (index, dict) pairs."""
+        return iter(self._native.iterrows())
+
+    def itertuples(self, index=True, name="Pandas"):
+        """Iterate over rows as tuples."""
+        return iter(self._native.itertuples(index))
+
+    def apply(self, func, axis=0, **kwargs):
+        """Apply function along an axis."""
+        if axis == 0:
+            result = self._native.apply(func, 0)
+            if isinstance(result, dict):
+                return result
+            return result
+        else:
+            results = self._native.apply(func, 1)
+            from .series import Series
+            return Series(results)
+
+    def applymap(self, func):
+        """Apply function element-wise."""
+        return DataFrame._from_native(self._native.applymap(func))

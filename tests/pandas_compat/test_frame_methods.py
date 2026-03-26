@@ -341,3 +341,45 @@ def test_transpose_numeric_values():
     # Should have columns "", "0", "1", "2"
     assert "" in result.columns
     assert result[""].tolist() == ["x"]
+
+
+# ---------------------------------------------------------------------------
+# iterrows / itertuples / apply / applymap
+# ---------------------------------------------------------------------------
+
+def test_iterrows_basic():
+    df = DataFrame({"a": [1, 2, 3], "b": [10, 20, 30]})
+    rows = list(df.iterrows())
+    assert len(rows) == 3
+    assert rows[0][0] == 0
+    assert rows[0][1]["a"] == 1
+    assert rows[2][1]["b"] == 30
+
+
+def test_itertuples_basic():
+    df = DataFrame({"x": [10, 20], "y": [1, 2]})
+    tuples = list(df.itertuples())
+    assert tuples[0][0] == 0  # index
+    assert tuples[0][1] == 10  # x
+    assert tuples[1][2] == 2  # y
+
+
+def test_apply_sum_axis0():
+    df = DataFrame({"a": [1, 2, 3], "b": [4, 5, 6]})
+    result = df.apply(lambda s: s.sum(), axis=0)
+    assert isinstance(result, dict)
+    assert result["a"] == 6
+    assert result["b"] == 15
+
+
+def test_apply_row_func_axis1():
+    df = DataFrame({"a": [1, 2], "b": [10, 20]})
+    result = df.apply(lambda row: row["a"] + row["b"], axis=1)
+    assert result.tolist() == [11, 22]
+
+
+def test_applymap_basic():
+    df = DataFrame({"a": [1, 2], "b": [3, 4]})
+    result = df.applymap(lambda x: x + 1)
+    assert result["a"].tolist() == [2, 3]
+    assert result["b"].tolist() == [4, 5]

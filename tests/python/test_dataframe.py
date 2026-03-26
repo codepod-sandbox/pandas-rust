@@ -145,3 +145,59 @@ def test_duplicated():
     df = pd.DataFrame({"a": [1, 2, 1], "b": [10, 20, 10]})
     d = df.duplicated()
     assert d.tolist() == [False, False, True]
+
+
+# ---------------------------------------------------------------------------
+# iterrows / itertuples
+# ---------------------------------------------------------------------------
+
+def test_iterrows():
+    df = pd.DataFrame({"a": [1, 2], "b": [3.0, 4.0]})
+    rows = list(df.iterrows())
+    assert len(rows) == 2
+    assert rows[0][0] == 0  # index
+    assert rows[0][1]["a"] == 1
+    assert rows[0][1]["b"] == 3.0
+    assert rows[1][0] == 1
+    assert rows[1][1]["a"] == 2
+
+
+def test_itertuples():
+    df = pd.DataFrame({"a": [1, 2], "b": [3.0, 4.0]})
+    tuples = list(df.itertuples())
+    assert len(tuples) == 2
+    assert tuples[0][0] == 0  # index
+    assert tuples[0][1] == 1  # a
+    assert tuples[0][2] == 3.0  # b
+
+
+def test_itertuples_no_index():
+    df = pd.DataFrame({"a": [1, 2], "b": [3.0, 4.0]})
+    tuples = list(df.itertuples(index=False))
+    assert tuples[0][0] == 1  # a (no index)
+    assert tuples[0][1] == 3.0  # b
+
+
+# ---------------------------------------------------------------------------
+# apply / applymap
+# ---------------------------------------------------------------------------
+
+def test_apply_axis0():
+    df = pd.DataFrame({"a": [1, 2, 3], "b": [4.0, 5.0, 6.0]})
+    result = df.apply(lambda s: s.sum(), axis=0)
+    assert isinstance(result, dict)
+    assert result["a"] == 6
+    assert result["b"] == 15.0
+
+
+def test_apply_axis1():
+    df = pd.DataFrame({"a": [1, 2, 3], "b": [10, 20, 30]})
+    result = df.apply(lambda row: row["a"] + row["b"], axis=1)
+    assert result.tolist() == [11, 22, 33]
+
+
+def test_applymap():
+    df = pd.DataFrame({"a": [1, 2], "b": [3, 4]})
+    result = df.applymap(lambda x: x * 2)
+    assert result["a"].tolist() == [2, 4]
+    assert result["b"].tolist() == [6, 8]

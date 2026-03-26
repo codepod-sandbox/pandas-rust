@@ -834,6 +834,127 @@ impl PyDataFrame {
         let result = self.inner().transpose().map_err(|e| pandas_err(e, vm))?;
         Ok(PyDataFrame::from_core(result))
     }
+
+    // --- iterrows ---
+
+    #[pymethod]
+    fn iterrows(&self, vm: &VirtualMachine) -> PyResult<PyObjectRef> {
+        let df = self.inner();
+        let col_names: Vec<String> = df.column_names().iter().map(|s| s.to_string()).collect();
+        let nrows = df.nrows();
+
+        let mut rows = Vec::with_capacity(nrows);
+        for i in 0..nrows {
+            let dict = vm.ctx.new_dict();
+            for name in &col_names {
+                let col = df.get_column(name).unwrap();
+                let val = crate::py_column::column_value_to_pyobj(col, i, vm)?;
+                dict.set_item(name.as_str(), val, vm)?;
+            }
+            let idx_val: PyObjectRef = vm.ctx.new_int(i).into();
+            let tuple = vm.ctx.new_tuple(vec![idx_val, dict.into()]);
+            rows.push(tuple.into());
+        }
+        Ok(vm.ctx.new_list(rows).into())
+    }
+
+    // --- itertuples ---
+
+    #[pymethod]
+    fn itertuples(
+        &self,
+        index: vm::function::OptionalArg<bool>,
+        vm: &VirtualMachine,
+    ) -> PyResult<PyObjectRef> {
+        let include_index = index.unwrap_or(true);
+        let df = self.inner();
+        let nrows = df.nrows();
+        let col_names: Vec<String> = df.column_names().iter().map(|s| s.to_string()).collect();
+
+        let mut rows = Vec::with_capacity(nrows);
+        for i in 0..nrows {
+            let mut vals = Vec::new();
+            if include_index {
+                vals.push(vm.ctx.new_int(i).into());
+            }
+            for name in &col_names {
+                let col = df.get_column(name).unwrap();
+                vals.push(crate::py_column::column_value_to_pyobj(col, i, vm)?);
+            }
+            rows.push(vm.ctx.new_tuple(vals).into());
+        }
+        Ok(vm.ctx.new_list(rows).into())
+    }
+
+    // --- apply ---
+
+    #[pymethod]
+    fn apply(
+        &self,
+        func: PyObjectRef,
+        axis: vm::function::OptionalArg<i32>,
+        vm: &VirtualMachine,
+    ) -> PyResult<PyObjectRef> {
+        let axis = axis.unwrap_or(0);
+        let df = self.inner();
+
+        if axis == 0 {
+            // Per-column: call func(series) for each column
+            let dict = vm.ctx.new_dict();
+            for (name, col) in df.iter_columns() {
+                let series = crate::py_series::PySeries::from_core(pandas_rust_core::Series::new(
+                    col.clone(),
+                ));
+                let series_obj: PyObjectRef = series.into_pyobject(vm);
+                let result = func.call((series_obj,), vm)?;
+                dict.set_item(name, result, vm)?;
+            }
+            Ok(dict.into())
+        } else {
+            // Per-row: call func(row_dict) for each row
+            let col_names: Vec<String> = df.column_names().iter().map(|s| s.to_string()).collect();
+            let nrows = df.nrows();
+            let mut results = Vec::with_capacity(nrows);
+
+            for i in 0..nrows {
+                let dict = vm.ctx.new_dict();
+                for name in &col_names {
+                    let col = df.get_column(name).unwrap();
+                    let val = crate::py_column::column_value_to_pyobj(col, i, vm)?;
+                    dict.set_item(name.as_str(), val, vm)?;
+                }
+                let dict_obj: PyObjectRef = dict.into();
+                let result = func.call((dict_obj,), vm)?;
+                results.push(result);
+            }
+
+            Ok(vm.ctx.new_list(results).into())
+        }
+    }
+
+    // --- applymap ---
+
+    #[pymethod]
+    fn applymap(&self, func: PyObjectRef, vm: &VirtualMachine) -> PyResult<PyDataFrame> {
+        let df = self.inner();
+        let mut new_cols = Vec::new();
+
+        for (name, col) in df.iter_columns() {
+            let mut new_values = Vec::with_capacity(col.len());
+            for i in 0..col.len() {
+                let val = crate::py_column::column_value_to_pyobj(col, i, vm)?;
+                let result = func.call((val,), vm)?;
+                new_values.push(result);
+            }
+            let list_obj = vm.ctx.new_list(new_values);
+            let new_col = crate::py_column::pyobj_to_column(name, &list_obj.into(), vm)?;
+            new_cols.push(new_col);
+        }
+
+        let result =
+            pandas_rust_core::DataFrame::from_columns(new_cols).map_err(|e| pandas_err(e, vm))?;
+        Ok(PyDataFrame::from_core(result))
+    }
 }
 
 // --- Module-level helpers ---

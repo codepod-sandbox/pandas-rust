@@ -581,32 +581,46 @@ impl PySeries {
     #[pymethod]
     fn map(&self, func_or_dict: PyObjectRef, vm: &VirtualMachine) -> PyResult<PySeries> {
         use vm::builtins::PyDict;
-        // Only support dict mapping
-        let dict = func_or_dict
-            .downcast_ref::<PyDict>()
-            .ok_or_else(|| vm.new_type_error("map only supports dict mapping".to_owned()))?;
 
         let col = self.inner.column();
-
-        // Collect results as Python objects then build column
         let mut results: Vec<PyObjectRef> = Vec::with_capacity(col.len());
-        for i in 0..col.len() {
-            let key = column_value_to_pyobj(col, i, vm)?;
-            // Look up key in dict
-            match dict.get_item_opt(&*key, vm)? {
-                Some(val) => results.push(val),
-                None => {
-                    // Missing key -> None/null
-                    results.push(vm.ctx.none());
+
+        if let Some(dict) = func_or_dict.downcast_ref::<PyDict>() {
+            // Dict mapping
+            for i in 0..col.len() {
+                let key = column_value_to_pyobj(col, i, vm)?;
+                match dict.get_item_opt(&*key, vm)? {
+                    Some(val) => results.push(val),
+                    None => results.push(vm.ctx.none()),
                 }
             }
+        } else if func_or_dict.is_callable() {
+            // Callable mapping
+            for i in 0..col.len() {
+                let val = column_value_to_pyobj(col, i, vm)?;
+                let result = func_or_dict.call((val,), vm)?;
+                results.push(result);
+            }
+        } else {
+            return Err(vm.new_type_error("map argument must be a dict or callable".to_owned()));
         }
 
-        // Build column from results
         use crate::py_column::pyobj_to_column;
         let list_obj = vm.ctx.new_list(results);
         let new_col = pyobj_to_column(col.name(), &list_obj.into(), vm)?;
         Ok(PySeries::from_core(Series::new(new_col)))
+    }
+
+    #[pymethod]
+    fn apply(&self, func: PyObjectRef, vm: &VirtualMachine) -> PyResult<PyObjectRef> {
+        let col = self.inner.column();
+        let mut results = Vec::with_capacity(col.len());
+        for i in 0..col.len() {
+            let val = column_value_to_pyobj(col, i, vm)?;
+            let result = func.call((val,), vm)?;
+            results.push(result);
+        }
+        Ok(vm.ctx.new_list(results).into())
     }
 
     #[pymethod]
