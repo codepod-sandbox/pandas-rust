@@ -284,9 +284,15 @@ class DataFrame:
             self._native[key] = value
 
     def head(self, n=5):
+        if n < 0:
+            return self.iloc[:len(self) + n]
         return DataFrame._from_native(self._native.head(n))
 
     def tail(self, n=5):
+        if n < 0:
+            return self.iloc[-n:]
+        if n == 0:
+            return self.iloc[0:0]
         return DataFrame._from_native(self._native.tail(n))
 
     def sort_values(self, by, ascending=True, inplace=False, **kwargs):
@@ -314,6 +320,9 @@ class DataFrame:
     def rename(self, columns=None, **kwargs):
         if columns is None:
             return self.copy()
+        if callable(columns):
+            mapping = {c: columns(c) for c in self.columns}
+            return DataFrame._from_native(self._native.rename(mapping))
         return DataFrame._from_native(self._native.rename(columns))
 
     def copy(self):
@@ -358,6 +367,9 @@ class DataFrame:
 
     # Null ops
     def fillna(self, value):
+        # Coerce int scalar to float for float columns
+        if isinstance(value, int) and not isinstance(value, bool):
+            value = float(value)
         return DataFrame._from_native(self._native.fillna(value))
 
     def dropna(self, how="any", subset=None, **kwargs):
@@ -443,7 +455,48 @@ class DataFrame:
             return result
         return self._native.to_csv(path)
 
+    def isin(self, values):
+        """Check whether each element is in values (list or dict)."""
+        result = {}
+        if isinstance(values, dict):
+            for col in self.columns:
+                if col in values:
+                    result[col] = self[col].isin(values[col]).tolist()
+                else:
+                    result[col] = [False] * len(self)
+        elif isinstance(values, list):
+            for col in self.columns:
+                result[col] = self[col].isin(values).tolist()
+        else:
+            for col in self.columns:
+                result[col] = self[col].isin(list(values)).tolist()
+        return DataFrame(result)
+
+    def replace(self, to_replace, value=None):
+        """Replace values in the DataFrame."""
+        result = {}
+        for col in self.columns:
+            vals = self[col].tolist()
+            if isinstance(to_replace, dict):
+                if col in to_replace:
+                    mapping = to_replace[col] if isinstance(to_replace[col], dict) else {to_replace[col]: value}
+                    result[col] = [mapping.get(v, v) for v in vals]
+                else:
+                    result[col] = vals[:]
+            else:
+                result[col] = [value if v == to_replace else v for v in vals]
+        return DataFrame(result)
+
     def to_dict(self, orient="dict"):
+        if orient == "records":
+            n = len(self)
+            records = []
+            col_vals = {col: self[col].tolist() for col in self.columns}
+            for i in range(n):
+                row = {col: col_vals[col][i] for col in self.columns}
+                records.append(row)
+            return records
+        # "dict" and "list" both return the native {col: [values]} format
         return self._native.to_dict()
 
     def to_numpy(self):
@@ -864,4 +917,6 @@ class DataFrame:
                     filled = [fill_val if v is None else v for v in vals]
                     result[col] = filled
             return result
-        return DataFrame._from_native(self._native.fillna(value))
+        # Coerce int scalar to float to avoid dtype mismatch with float columns
+        scalar = float(value) if isinstance(value, int) and not isinstance(value, bool) else value
+        return DataFrame._from_native(self._native.fillna(scalar))

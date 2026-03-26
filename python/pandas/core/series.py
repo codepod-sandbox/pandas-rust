@@ -65,10 +65,10 @@ class Series:
 
     @property
     def shape(self):
-        return (self._native.count(),)
+        return (self._native.__len__(),)
 
     def __len__(self):
-        return self._native.count()
+        return self._native.__len__()
 
     def __repr__(self):
         return repr(self._native)
@@ -274,8 +274,17 @@ class Series:
         return Series._from_native(self._native.replace(to_replace, value))
 
     def between(self, left, right, inclusive="both"):
-        """Return boolean mask: left <= self <= right."""
-        return Series._from_native(self._native.between(float(left), float(right)))
+        """Return boolean mask based on inclusive setting."""
+        if inclusive == "both":
+            return (self >= left) & (self <= right)
+        elif inclusive == "left":
+            return (self >= left) & (self < right)
+        elif inclusive == "right":
+            return (self > left) & (self <= right)
+        elif inclusive == "neither":
+            return (self > left) & (self < right)
+        # fallback
+        return (self >= left) & (self <= right)
 
     def isin(self, values):
         """Return boolean mask: element is in values list."""
@@ -416,6 +425,26 @@ class Series:
     def round(self, decimals=0):
         """Round float values to given number of decimal places."""
         return Series._from_native(self._native.round(decimals))
+
+    def item(self):
+        """Return the first element of the underlying data as a Python scalar."""
+        if len(self) != 1:
+            raise ValueError("can only convert an array of size 1 to a Python scalar")
+        return self.tolist()[0]
+
+    def head(self, n=5):
+        """Return first n elements."""
+        if n < 0:
+            return self.iloc[:len(self) + n]
+        return self.iloc[:n]
+
+    def tail(self, n=5):
+        """Return last n elements."""
+        if n < 0:
+            return self.iloc[-n:]
+        if n == 0:
+            return self.iloc[0:0]
+        return self.iloc[-n:]
 
     def rolling(self, window):
         """Return a _Rolling object for window calculations."""
