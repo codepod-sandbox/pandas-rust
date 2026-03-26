@@ -761,6 +761,40 @@ class DataFrame:
             result[col] = self[col].nunique()
         return result
 
+    def value_counts(self, subset=None, normalize=False, sort=True, ascending=False, dropna=True):
+        """Return a Series containing counts of unique rows."""
+        from .series import Series
+        cols = subset if subset is not None else list(self.columns)
+        if isinstance(cols, str):
+            cols = [cols]
+        # Build tuples for each row (across selected columns)
+        rows = []
+        for i in range(len(self)):
+            row_key = tuple(self[c].tolist()[i] for c in cols)
+            rows.append(row_key)
+        counts = {}
+        for key in rows:
+            if dropna and any(v is None for v in key):
+                continue
+            counts[key] = counts.get(key, 0) + 1
+        if sort:
+            sorted_keys = sorted(counts, key=lambda k: counts[k], reverse=not ascending)
+        else:
+            sorted_keys = list(counts.keys())
+        total = sum(counts.values()) if normalize else None
+        result_vals = []
+        for key in sorted_keys:
+            v = counts[key]
+            result_vals.append(v / total if normalize else v)
+        # Return as a Series with tuple keys as labels (simplified: return counts dict)
+        # For compatibility, return as Series of count values
+        if len(cols) == 1:
+            # Single column: keys are single values
+            result = {key[0]: val for key, val in zip(sorted_keys, result_vals)}
+        else:
+            result = {key: val for key, val in zip(sorted_keys, result_vals)}
+        return result
+
     def pivot_table(self, values=None, index=None, columns=None, aggfunc="mean"):
         if index is None:
             raise ValueError("index is required")

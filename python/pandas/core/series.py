@@ -213,6 +213,16 @@ class Series:
     def tolist(self):
         return self._native.tolist()
 
+    # Alias matching upstream pandas API
+    to_list = tolist
+
+    def rename(self, index=None, **kwargs):
+        """Return a new Series with the name changed."""
+        # When called as s.rename("new_name"), index is the new name
+        new_name = index
+        vals = self.tolist()
+        return Series(vals, name=new_name)
+
     def to_numpy(self):
         return self._native.to_numpy()
 
