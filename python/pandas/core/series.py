@@ -43,10 +43,18 @@ class Series:
     """One-dimensional labeled array."""
 
     def __init__(self, data=None, name=None, index=None):
+        self._py_data = None  # fallback storage for list-of-lists
+        self._py_name = None
         if isinstance(data, _native.Series):
             self._native = data
         elif isinstance(data, list):
             col_name = name or "0"
+            # If the list contains list elements, can't store in native
+            if data and isinstance(data[0], list):
+                self._py_data = data
+                self._py_name = col_name
+                self._native = None
+                return
             df = _native.DataFrame({col_name: data})
             self._native = df.get_column(col_name)
         elif isinstance(data, (int, float, str, bool)) and not isinstance(data, type):
@@ -57,6 +65,11 @@ class Series:
                 data_list = [data]
             col_name = name or "0"
             df = _native.DataFrame({col_name: data_list})
+            self._native = df.get_column(col_name)
+        elif isinstance(data, dict):
+            col_name = name or "0"
+            values = list(data.values())
+            df = _native.DataFrame({col_name: values})
             self._native = df.get_column(col_name)
         elif data is None:
             col_name = name or "0"
@@ -69,24 +82,36 @@ class Series:
     def _from_native(cls, native_series):
         obj = cls.__new__(cls)
         obj._native = native_series
+        obj._py_data = None
+        obj._py_name = None
         return obj
 
     @property
     def name(self):
+        if self._py_data is not None:
+            return self._py_name
         return self._native.name
 
     @property
     def dtype(self):
+        if self._py_data is not None:
+            return "object"
         return self._native.dtype
 
     @property
     def shape(self):
+        if self._py_data is not None:
+            return (len(self._py_data),)
         return (self._native.__len__(),)
 
     def __len__(self):
+        if self._py_data is not None:
+            return len(self._py_data)
         return self._native.__len__()
 
     def __repr__(self):
+        if self._py_data is not None:
+            return "Series({})".format(self._py_data)
         return repr(self._native)
 
     @property
@@ -232,6 +257,8 @@ class Series:
         return Series._from_native(self._native.copy())
 
     def tolist(self):
+        if self._py_data is not None:
+            return list(self._py_data)
         return self._native.tolist()
 
     # Alias matching upstream pandas API
@@ -662,6 +689,59 @@ class Series:
         # Return a DataFrame with "index" column and the series values column
         index_col = list(range(len(vals)))
         return DataFrame({"index": index_col, series_name: vals})
+
+    def _quantile(self, q):
+        """Compute q-th quantile (linear interpolation)."""
+        vals = sorted([v for v in self.tolist() if v is not None])
+        if not vals:
+            return None
+        pos = q * (len(vals) - 1)
+        lo = int(pos)
+        hi = min(lo + 1, len(vals) - 1)
+        frac = pos - lo
+        return vals[lo] * (1 - frac) + vals[hi] * frac
+
+    def describe(self):
+        """Return summary statistics as a DataFrame."""
+        from .frame import DataFrame
+        if self.dtype in ("int64", "float64"):
+            stats = {
+                "count": [float(self.count())],
+                "mean": [self.mean()],
+                "std": [self.std()],
+                "min": [self.min()],
+                "25%": [self._quantile(0.25)],
+                "50%": [self._quantile(0.5)],
+                "75%": [self._quantile(0.75)],
+                "max": [self.max()],
+            }
+            return DataFrame(stats)
+        else:
+            stats = {
+                "count": [self.count()],
+                "unique": [self.nunique()],
+            }
+            return DataFrame(stats)
+
+    def sem(self, ddof=1):
+        """Return standard error of the mean."""
+        import math
+        s = self.std(ddof=ddof)
+        n = self.count()
+        if n > 0 and s is not None:
+            return s / math.sqrt(n)
+        return None
+
+    def explode(self):
+        """Expand list-like values into individual rows."""
+        vals = self.tolist()
+        result = []
+        for v in vals:
+            if isinstance(v, list):
+                result.extend(v)
+            else:
+                result.append(v)
+        return Series(result, name=self.name)
 
 
 class _Rolling:

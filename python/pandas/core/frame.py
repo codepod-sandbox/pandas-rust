@@ -168,6 +168,8 @@ class DataFrame:
     """Two-dimensional labeled data structure."""
 
     def __init__(self, data=None, columns=None, index=None):
+        # _py_cols stores columns whose values can't be held by native (e.g., list-of-lists)
+        self._py_cols = {}
         if data is None:
             self._native = _native.DataFrame({})
         elif isinstance(data, dict):
@@ -185,9 +187,32 @@ class DataFrame:
                         processed[k] = [v]
                 else:
                     processed[k] = v
-            self._native = _native.DataFrame(processed)
+            # Separate columns that contain list-of-lists from native-compatible columns
+            native_processed = {}
+            for k, v in processed.items():
+                if isinstance(v, list) and v and isinstance(v[0], list):
+                    self._py_cols[k] = v
+                else:
+                    native_processed[k] = v
+            self._native = _native.DataFrame(native_processed)
         elif isinstance(data, _native.DataFrame):
             self._native = data
+        elif hasattr(data, 'shape') and hasattr(data, 'tolist'):
+            # numpy ndarray or similar
+            rows = data.tolist()
+            if not rows:
+                self._native = _native.DataFrame({})
+            else:
+                if not isinstance(rows[0], list):
+                    rows = [[v] for v in rows]  # 1D array
+                ncols = len(rows[0]) if rows else 0
+                if columns is None:
+                    columns = [str(i) for i in range(ncols)]
+                col_data = {c: [] for c in columns}
+                for row in rows:
+                    for j, c in enumerate(columns):
+                        col_data[c].append(row[j] if j < len(row) else None)
+                self._native = _native.DataFrame(col_data)
         elif isinstance(data, list):
             if len(data) == 0:
                 self._native = _native.DataFrame({})
@@ -228,22 +253,39 @@ class DataFrame:
         """Wrap a native DataFrame without copying."""
         obj = cls.__new__(cls)
         obj._native = native_df
+        obj._py_cols = {}
         return obj
 
     @property
     def shape(self):
-        return self._native.shape
+        native_shape = self._native.shape
+        total_cols = native_shape[1] + len(self._py_cols)
+        nrows = native_shape[0]
+        if nrows == 0 and self._py_cols:
+            first = next(iter(self._py_cols.values()))
+            nrows = len(first)
+        return (nrows, total_cols)
 
     @property
     def dtypes(self):
-        return self._native.dtypes
+        d = dict(self._native.dtypes)
+        for k in self._py_cols:
+            d[k] = "object"
+        return d
 
     @property
     def columns(self):
-        return _ColumnIndex(self._native.columns)
+        native_cols = list(self._native.columns)
+        py_col_keys = [k for k in self._py_cols if k not in native_cols]
+        return _ColumnIndex(native_cols + py_col_keys)
 
     def __len__(self):
-        return self._native.shape[0]
+        native_rows = self._native.shape[0]
+        if native_rows == 0 and self._py_cols:
+            # All columns are py_cols
+            first = next(iter(self._py_cols.values()))
+            return len(first)
+        return native_rows
 
     def __iter__(self):
         return iter(self.columns)
@@ -272,10 +314,13 @@ class DataFrame:
 
     def _take_rows(self, indices):
         """Select rows by integer position indices."""
-        return DataFrame._from_native(self._native.take_rows(indices))
+        result = DataFrame._from_native(self._native.take_rows(indices))
+        for k, v in self._py_cols.items():
+            result._py_cols[k] = [v[i] for i in indices]
+        return result
 
     def __getitem__(self, key):
-        from .series import Series
+        from .series import Series, _PythonSeries
         # Boolean Series mask → filter rows
         if isinstance(key, Series):
             mask_list = key.tolist()
@@ -285,16 +330,42 @@ class DataFrame:
         if isinstance(key, list) and len(key) > 0 and isinstance(key[0], bool):
             indices = [i for i, v in enumerate(key) if v]
             return self._take_rows(indices)
+        # Single column name — check py_cols first
+        if isinstance(key, str) and key in self._py_cols:
+            return _PythonSeries(self._py_cols[key], name=key)
+        # List of column names
+        if isinstance(key, list):
+            result_df = DataFrame.__new__(DataFrame)
+            result_df._py_cols = {}
+            native_keys = [k for k in key if k not in self._py_cols]
+            if native_keys:
+                native_sub = self._native[native_keys]
+                if isinstance(native_sub, _native.DataFrame):
+                    result_df._native = native_sub
+                else:
+                    result_df._native = _native.DataFrame({native_keys[0]: native_sub.tolist()})
+            else:
+                result_df._native = _native.DataFrame({})
+            for k in key:
+                if k in self._py_cols:
+                    result_df._py_cols[k] = self._py_cols[k]
+            return result_df
         result = self._native[key]
         if isinstance(result, _native.Series):
             return Series._from_native(result)
         elif isinstance(result, _native.DataFrame):
-            return DataFrame._from_native(result)
+            r = DataFrame._from_native(result)
+            r._py_cols = {}
+            return r
         return result
 
     def __setitem__(self, key, value):
-        from .series import Series
-        if isinstance(value, Series):
+        from .series import Series, _PythonSeries
+        if isinstance(value, _PythonSeries):
+            self._py_cols[key] = value.tolist()
+        elif isinstance(value, list) and value and isinstance(value[0], list):
+            self._py_cols[key] = value
+        elif isinstance(value, Series):
             self._native[key] = value.tolist()
         else:
             self._native[key] = value
@@ -342,7 +413,9 @@ class DataFrame:
         return DataFrame._from_native(self._native.rename(columns))
 
     def copy(self):
-        return DataFrame._from_native(self._native.copy())
+        result = DataFrame._from_native(self._native.copy())
+        result._py_cols = {k: list(v) for k, v in self._py_cols.items()}
+        return result
 
     def astype(self, dtype):
         result = self.copy()
@@ -1294,3 +1367,98 @@ class DataFrame:
         # Coerce int scalar to float to avoid dtype mismatch with float columns
         scalar = float(value) if isinstance(value, int) and not isinstance(value, bool) else value
         return DataFrame._from_native(self._native.fillna(scalar))
+
+    def idxmax(self, axis=0):
+        """Return index of maximum value for each column."""
+        result = {}
+        for col in self.columns:
+            try:
+                result[col] = self[col].idxmax()
+            except (TypeError, AttributeError):
+                pass
+        return result
+
+    def idxmin(self, axis=0):
+        """Return index of minimum value for each column."""
+        result = {}
+        for col in self.columns:
+            try:
+                result[col] = self[col].idxmin()
+            except (TypeError, AttributeError):
+                pass
+        return result
+
+    def rolling(self, window):
+        """Return a _DataFrameRolling object for window calculations."""
+        return _DataFrameRolling(self, window)
+
+    def expanding(self):
+        """Return a _DataFrameExpanding object for expanding window calculations."""
+        return _DataFrameExpanding(self)
+
+    def explode(self, column):
+        """Expand list-like values in column into rows."""
+        from .series import Series
+        col_vals = self[column].tolist()
+        other_cols = [c for c in self.columns if c != column]
+
+        new_data = {c: [] for c in self.columns}
+        for i, val in enumerate(col_vals):
+            if isinstance(val, list):
+                for v in val:
+                    new_data[column].append(v)
+                    for c in other_cols:
+                        new_data[c].append(self[c].tolist()[i])
+            else:
+                new_data[column].append(val)
+                for c in other_cols:
+                    new_data[c].append(self[c].tolist()[i])
+        return DataFrame(new_data)
+
+
+class _DataFrameRolling:
+    """Rolling window calculations for DataFrame."""
+
+    def __init__(self, df, window):
+        self._df = df
+        self._window = window
+
+    def _apply(self, method):
+        result = {}
+        for col in self._df.columns:
+            try:
+                r = getattr(self._df[col].rolling(self._window), method)()
+                result[col] = r.tolist()
+            except (TypeError, AttributeError):
+                pass
+        return DataFrame(result)
+
+    def mean(self): return self._apply("mean")
+    def sum(self): return self._apply("sum")
+    def min(self): return self._apply("min")
+    def max(self): return self._apply("max")
+    def std(self): return self._apply("std")
+    def count(self): return self._apply("count")
+
+
+class _DataFrameExpanding:
+    """Expanding window calculations for DataFrame."""
+
+    def __init__(self, df):
+        self._df = df
+
+    def _apply(self, method):
+        result = {}
+        for col in self._df.columns:
+            try:
+                r = getattr(self._df[col].expanding(), method)()
+                result[col] = r.tolist()
+            except (TypeError, AttributeError):
+                pass
+        return DataFrame(result)
+
+    def sum(self): return self._apply("sum")
+    def mean(self): return self._apply("mean")
+    def min(self): return self._apply("min")
+    def max(self): return self._apply("max")
+    def count(self): return self._apply("count")
