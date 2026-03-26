@@ -567,6 +567,18 @@ impl PySeries {
     }
 
     #[pymethod]
+    fn shift(
+        &self,
+        periods: vm::function::OptionalArg<i64>,
+        _fill_value: vm::function::OptionalArg<PyObjectRef>,
+        _vm: &VirtualMachine,
+    ) -> PySeries {
+        let p = periods.unwrap_or(1);
+        let col = math::shift_column(self.inner.column(), p);
+        PySeries::from_core(Series::new(col))
+    }
+
+    #[pymethod]
     fn any(&self, _vm: &VirtualMachine) -> bool {
         math::any_col(self.inner.column())
     }

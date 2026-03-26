@@ -417,6 +417,129 @@ pub fn cummin(col: &Column) -> Result<Column> {
     }
 }
 
+/// Shift column elements by `periods` positions.
+/// periods > 0: shift down (first `periods` positions become null)
+/// periods < 0: shift up (last `|periods|` positions become null)
+/// periods == 0: return a clone
+pub fn shift_column(col: &Column, periods: i64) -> Column {
+    let n = col.len();
+    if n == 0 || periods == 0 {
+        return col.clone();
+    }
+
+    let abs_periods = periods.unsigned_abs() as usize;
+    if abs_periods >= n {
+        // All values become null
+        let null_mask = vec![true; n];
+        return match &col.data {
+            ColumnData::Int64(v) => {
+                Column::new_with_nulls(col.name(), ColumnData::Int64(vec![0i64; v.len()]), null_mask)
+                    .expect("valid shift null mask")
+            }
+            ColumnData::Float64(v) => {
+                Column::new_with_nulls(col.name(), ColumnData::Float64(vec![0.0f64; v.len()]), null_mask)
+                    .expect("valid shift null mask")
+            }
+            ColumnData::Str(v) => {
+                Column::new_with_nulls(col.name(), ColumnData::Str(vec![String::new(); v.len()]), null_mask)
+                    .expect("valid shift null mask")
+            }
+            ColumnData::Bool(v) => {
+                Column::new_with_nulls(col.name(), ColumnData::Bool(vec![false; v.len()]), null_mask)
+                    .expect("valid shift null mask")
+            }
+        };
+    }
+
+    let mut null_mask = vec![false; n];
+
+    if periods > 0 {
+        // Shift down: result[i] = col[i - periods] for i >= periods, null for i < periods
+        for i in 0..abs_periods {
+            null_mask[i] = true;
+        }
+        // Also carry over existing nulls shifted down
+        for i in abs_periods..n {
+            if col.is_null(i - abs_periods) {
+                null_mask[i] = true;
+            }
+        }
+    } else {
+        // Shift up: result[i] = col[i + |periods|] for i < n - |periods|, null for i >= n - |periods|
+        for i in (n - abs_periods)..n {
+            null_mask[i] = true;
+        }
+        for i in 0..(n - abs_periods) {
+            if col.is_null(i + abs_periods) {
+                null_mask[i] = true;
+            }
+        }
+    }
+
+    let any_null = null_mask.iter().any(|&b| b);
+
+    let data = match &col.data {
+        ColumnData::Int64(v) => {
+            let mut new_v = vec![0i64; n];
+            if periods > 0 {
+                for i in abs_periods..n {
+                    new_v[i] = v[i - abs_periods];
+                }
+            } else {
+                for i in 0..(n - abs_periods) {
+                    new_v[i] = v[i + abs_periods];
+                }
+            }
+            ColumnData::Int64(new_v)
+        }
+        ColumnData::Float64(v) => {
+            let mut new_v = vec![0.0f64; n];
+            if periods > 0 {
+                for i in abs_periods..n {
+                    new_v[i] = v[i - abs_periods];
+                }
+            } else {
+                for i in 0..(n - abs_periods) {
+                    new_v[i] = v[i + abs_periods];
+                }
+            }
+            ColumnData::Float64(new_v)
+        }
+        ColumnData::Str(v) => {
+            let mut new_v = vec![String::new(); n];
+            if periods > 0 {
+                for i in abs_periods..n {
+                    new_v[i] = v[i - abs_periods].clone();
+                }
+            } else {
+                for i in 0..(n - abs_periods) {
+                    new_v[i] = v[i + abs_periods].clone();
+                }
+            }
+            ColumnData::Str(new_v)
+        }
+        ColumnData::Bool(v) => {
+            let mut new_v = vec![false; n];
+            if periods > 0 {
+                for i in abs_periods..n {
+                    new_v[i] = v[i - abs_periods];
+                }
+            } else {
+                for i in 0..(n - abs_periods) {
+                    new_v[i] = v[i + abs_periods];
+                }
+            }
+            ColumnData::Bool(new_v)
+        }
+    };
+
+    if any_null {
+        Column::new_with_nulls(col.name(), data, null_mask).expect("valid shift null mask")
+    } else {
+        Column::new(col.name(), data)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -565,5 +688,78 @@ mod tests {
     fn test_cumsum_error_str() {
         let col = Column::new("x", ColumnData::Str(vec!["a".into()]));
         assert!(cumsum(&col).is_err());
+    }
+
+    #[test]
+    fn test_shift_down_int64() {
+        let col = int_col(vec![1, 2, 3, 4]);
+        let result = shift_column(&col, 1);
+        assert!(result.is_null(0));
+        assert!(!result.is_null(1));
+        match &result.data {
+            ColumnData::Int64(v) => {
+                assert_eq!(v[1], 1);
+                assert_eq!(v[2], 2);
+                assert_eq!(v[3], 3);
+            }
+            _ => panic!("wrong dtype"),
+        }
+    }
+
+    #[test]
+    fn test_shift_up_int64() {
+        let col = int_col(vec![1, 2, 3, 4]);
+        let result = shift_column(&col, -1);
+        assert!(!result.is_null(0));
+        assert!(result.is_null(3));
+        match &result.data {
+            ColumnData::Int64(v) => {
+                assert_eq!(v[0], 2);
+                assert_eq!(v[1], 3);
+                assert_eq!(v[2], 4);
+            }
+            _ => panic!("wrong dtype"),
+        }
+    }
+
+    #[test]
+    fn test_shift_zero() {
+        let col = int_col(vec![1, 2, 3]);
+        let result = shift_column(&col, 0);
+        assert!(!result.is_null(0));
+        match &result.data {
+            ColumnData::Int64(v) => assert_eq!(v, &[1, 2, 3]),
+            _ => panic!("wrong dtype"),
+        }
+    }
+
+    #[test]
+    fn test_shift_by_two() {
+        let col = int_col(vec![1, 2, 3, 4]);
+        let result = shift_column(&col, 2);
+        assert!(result.is_null(0));
+        assert!(result.is_null(1));
+        assert!(!result.is_null(2));
+        match &result.data {
+            ColumnData::Int64(v) => {
+                assert_eq!(v[2], 1);
+                assert_eq!(v[3], 2);
+            }
+            _ => panic!("wrong dtype"),
+        }
+    }
+
+    #[test]
+    fn test_shift_float64() {
+        let col = float_col(vec![1.0, 2.0, 3.0]);
+        let result = shift_column(&col, 1);
+        assert!(result.is_null(0));
+        match &result.data {
+            ColumnData::Float64(v) => {
+                assert_eq!(v[1], 1.0);
+                assert_eq!(v[2], 2.0);
+            }
+            _ => panic!("wrong dtype"),
+        }
     }
 }

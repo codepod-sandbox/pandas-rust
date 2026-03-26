@@ -328,7 +328,8 @@ class DataFrame:
         return DataFrame._from_native(result)
 
     # GroupBy & Merge
-    def groupby(self, by):
+    def groupby(self, by, sort=True, as_index=True, **kwargs):
+        # sort and as_index accepted but not yet implemented
         if isinstance(by, str):
             by = [by]
         from .groupby import GroupBy
@@ -570,3 +571,57 @@ class DataFrame:
             for k in keys:
                 result = result.drop(columns=[k])
         return result
+
+    def where(self, cond, other=None):
+        """Keep values where cond is True, replace False positions with other."""
+        from .series import Series
+        if isinstance(cond, Series):
+            mask = cond.tolist()
+            result = {}
+            for col in self.columns:
+                vals = self[col].tolist()
+                result[col] = [v if m else other for v, m in zip(vals, mask)]
+            return DataFrame(result)
+        elif isinstance(cond, DataFrame):
+            result = {}
+            for col in self.columns:
+                cond_vals = cond[col].tolist()
+                vals = self[col].tolist()
+                result[col] = [v if m else other for v, m in zip(vals, cond_vals)]
+            return DataFrame(result)
+        else:
+            # Assume iterable mask
+            mask = list(cond)
+            result = {}
+            for col in self.columns:
+                vals = self[col].tolist()
+                result[col] = [v if m else other for v, m in zip(vals, mask)]
+            return DataFrame(result)
+
+    def equals(self, other):
+        """Test whether two DataFrames are identical element-by-element (NaN-safe)."""
+        if not isinstance(other, DataFrame):
+            return False
+        if self.shape != other.shape:
+            return False
+        if list(self.columns) != list(other.columns):
+            return False
+        for col in self.columns:
+            l = self[col].tolist()
+            r = other[col].tolist()
+            for lv, rv in zip(l, r):
+                if lv is None and rv is None:
+                    continue
+                if isinstance(lv, float) and isinstance(rv, float):
+                    if lv != lv and rv != rv:  # both NaN
+                        continue
+                if lv != rv:
+                    return False
+        return True
+
+    def join(self, other, how="left", **kwargs):
+        """Join two DataFrames horizontally (by index)."""
+        import pandas as pd
+        if isinstance(other, DataFrame):
+            return pd.concat([self, other], axis=1)
+        raise TypeError("Can only join DataFrame objects")

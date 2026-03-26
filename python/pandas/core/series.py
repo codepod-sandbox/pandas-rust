@@ -300,6 +300,38 @@ class Series:
                 best_val = v
         return best_idx
 
+    def shift(self, periods=1, fill_value=None):
+        """Shift elements by periods positions."""
+        return Series._from_native(self._native.shift(periods))
+
+    def where(self, cond, other=None):
+        """Keep values where cond is True, replace False positions with other."""
+        if isinstance(cond, Series):
+            mask = cond.tolist()
+        else:
+            mask = list(cond)
+        vals = self.tolist()
+        result = [v if m else other for v, m in zip(vals, mask)]
+        return Series(result, name=self.name)
+
+    def equals(self, other):
+        """Test whether two Series are identical element-by-element (NaN-safe)."""
+        if not isinstance(other, Series):
+            return False
+        if len(self) != len(other):
+            return False
+        l = self.tolist()
+        r = other.tolist()
+        for lv, rv in zip(l, r):
+            if lv is None and rv is None:
+                continue
+            if isinstance(lv, float) and isinstance(rv, float):
+                if lv != lv and rv != rv:  # both NaN
+                    continue
+            if lv != rv:
+                return False
+        return True
+
     def cumsum(self):
         return Series._from_native(self._native.cumsum())
 

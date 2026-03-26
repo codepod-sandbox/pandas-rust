@@ -182,9 +182,15 @@ pub fn neg(col: &Column) -> Result<Column> {
 }
 
 fn scalar_op_numeric(col: &Column, scalar: f64, op: impl Fn(f64, f64) -> f64) -> Result<Column> {
+    // If the column is Int64 and the scalar is a whole number, preserve Int64 dtype.
     let data = match &col.data {
         ColumnData::Int64(v) => {
-            ColumnData::Float64(v.iter().map(|&x| op(x as f64, scalar)).collect())
+            if scalar.fract() == 0.0 && scalar >= i64::MIN as f64 && scalar <= i64::MAX as f64 {
+                let scalar_i = scalar as i64;
+                ColumnData::Int64(v.iter().map(|&x| op(x as f64, scalar_i as f64) as i64).collect())
+            } else {
+                ColumnData::Float64(v.iter().map(|&x| op(x as f64, scalar)).collect())
+            }
         }
         ColumnData::Float64(v) => ColumnData::Float64(v.iter().map(|&x| op(x, scalar)).collect()),
         ColumnData::Bool(_) => {
@@ -218,7 +224,28 @@ pub fn mul_scalar(col: &Column, scalar: f64) -> Result<Column> {
 }
 
 pub fn div_scalar(col: &Column, scalar: f64) -> Result<Column> {
-    scalar_op_numeric(col, scalar, |a, b| a / b)
+    // Division always returns float (matching pandas behavior)
+    let data = match &col.data {
+        ColumnData::Int64(v) => {
+            ColumnData::Float64(v.iter().map(|&x| x as f64 / scalar).collect())
+        }
+        ColumnData::Float64(v) => ColumnData::Float64(v.iter().map(|&x| x / scalar).collect()),
+        ColumnData::Bool(_) => {
+            return Err(PandasError::TypeError(
+                "arithmetic not supported for Bool columns".to_string(),
+            ));
+        }
+        ColumnData::Str(_) => {
+            return Err(PandasError::TypeError(
+                "arithmetic not supported for Str columns".to_string(),
+            ));
+        }
+    };
+    let result = match col.null_mask.clone() {
+        Some(mask) => Column::new_with_nulls(col.name.clone(), data, mask)?,
+        None => Column::new(col.name.clone(), data),
+    };
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -374,8 +401,20 @@ mod tests {
     fn test_add_scalar() {
         let col = int_col("a", vec![1, 2, 3]);
         let result = add_scalar(&col, 10.0).unwrap();
+        // Int64 + whole-number scalar stays Int64
         match &result.data {
-            ColumnData::Float64(v) => assert_eq!(v, &[11.0, 12.0, 13.0]),
+            ColumnData::Int64(v) => assert_eq!(v, &[11, 12, 13]),
+            _ => panic!("expected Int64"),
+        }
+    }
+
+    #[test]
+    fn test_add_scalar_float_promotes() {
+        let col = int_col("a", vec![1, 2, 3]);
+        let result = add_scalar(&col, 0.5).unwrap();
+        // Int64 + fractional scalar promotes to Float64
+        match &result.data {
+            ColumnData::Float64(v) => assert_eq!(v, &[1.5, 2.5, 3.5]),
             _ => panic!("expected Float64"),
         }
     }
@@ -394,9 +433,10 @@ mod tests {
     fn test_mul_scalar() {
         let col = int_col("a", vec![2, 3]);
         let result = mul_scalar(&col, 3.0).unwrap();
+        // Int64 * whole-number scalar stays Int64
         match &result.data {
-            ColumnData::Float64(v) => assert_eq!(v, &[6.0, 9.0]),
-            _ => panic!("expected Float64"),
+            ColumnData::Int64(v) => assert_eq!(v, &[6, 9]),
+            _ => panic!("expected Int64"),
         }
     }
 
