@@ -21,7 +21,7 @@ pub mod _pandas_native {
     use crate::py_series::PySeries;
     use vm::builtins::PyStr;
     use vm::class::PyClassImpl;
-    use vm::{PyRef, PyResult, VirtualMachine};
+    use vm::{PyObjectRef, PyRef, PyResult, VirtualMachine};
 
     // Register class types as module attributes
     #[allow(non_snake_case)]
@@ -61,5 +61,39 @@ pub mod _pandas_native {
     #[pyfunction]
     fn _version(_vm: &VirtualMachine) -> PyResult<String> {
         Ok("0.1.0".to_string())
+    }
+
+    #[pyfunction]
+    fn concat(
+        objs: PyObjectRef,
+        axis: vm::function::OptionalArg<i32>,
+        vm: &VirtualMachine,
+    ) -> PyResult<PyDataFrame> {
+        use pandas_rust_core::concat as core_concat;
+        use pandas_rust_core::DataFrame;
+        let axis = axis.unwrap_or(0);
+        let list = objs.downcast_ref::<vm::builtins::PyList>().ok_or_else(|| {
+            vm.new_type_error("concat() requires a list of DataFrames".to_owned())
+        })?;
+        let items = list.borrow_vec();
+        let dfs: PyResult<Vec<DataFrame>> = items
+            .iter()
+            .map(|obj| {
+                obj.downcast_ref::<PyDataFrame>()
+                    .ok_or_else(|| {
+                        vm.new_type_error("concat() list items must be DataFrames".to_owned())
+                    })
+                    .map(|pdf| pdf.data.read().unwrap().clone())
+            })
+            .collect();
+        let dfs = dfs?;
+        let refs: Vec<&DataFrame> = dfs.iter().collect();
+        let result = if axis == 0 {
+            core_concat::concat_rows(&refs)
+        } else {
+            core_concat::concat_cols(&refs)
+        }
+        .map_err(|e| crate::py_column::pandas_err(e, vm))?;
+        Ok(PyDataFrame::from_core(result))
     }
 }

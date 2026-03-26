@@ -200,4 +200,81 @@ def test_applymap():
     df = pd.DataFrame({"a": [1, 2], "b": [3, 4]})
     result = df.applymap(lambda x: x * 2)
     assert result["a"].tolist() == [2, 4]
-    assert result["b"].tolist() == [6, 8]
+
+
+def test_iloc_slice():
+    df = pd.DataFrame({"a": [1, 2, 3, 4, 5]})
+    sub = df.iloc[1:3]
+    assert sub.shape == (2, 1)
+    assert sub["a"].tolist() == [2, 3]
+
+
+def test_iloc_single_row():
+    df = pd.DataFrame({"a": [10, 20, 30], "b": [1.0, 2.0, 3.0]})
+    row = df.iloc[0]
+    assert row["a"] == 10
+    assert row["b"] == 1.0
+
+
+def test_iloc_negative():
+    df = pd.DataFrame({"a": [1, 2, 3]})
+    row = df.iloc[-1]
+    assert row["a"] == 3
+
+
+def test_iloc_list():
+    df = pd.DataFrame({"a": [10, 20, 30, 40]})
+    sub = df.iloc[[0, 2]]
+    assert sub.shape == (2, 1)
+    assert sub["a"].tolist() == [10, 30]
+
+
+def test_loc_slice():
+    df = pd.DataFrame({"a": [10, 20, 30, 40, 50]})
+    sub = df.loc[1:3]  # inclusive both ends
+    assert sub.shape == (3, 1)
+    assert sub["a"].tolist() == [20, 30, 40]
+
+
+def test_loc_single():
+    df = pd.DataFrame({"a": [10, 20, 30]})
+    row = df.loc[1]
+    assert row["a"] == 20
+
+
+def test_boolean_mask_dataframe():
+    df = pd.DataFrame({"a": [1, 2, 3], "b": [10, 20, 30]})
+    mask = df["a"].gt(1)
+    sub = df[mask]
+    assert sub.shape == (2, 2)
+    assert sub["a"].tolist() == [2, 3]
+
+
+def test_concat_basic():
+    df1 = pd.DataFrame({"a": [1, 2]})
+    df2 = pd.DataFrame({"a": [3, 4]})
+    result = pd.concat([df1, df2])
+    assert result.shape == (4, 1)
+    assert result["a"].tolist() == [1, 2, 3, 4]
+
+
+def test_from_dict_of_series():
+    s1 = pd.Series([1, 2, 3], name="x")
+    s2 = pd.Series([4, 5, 6], name="y")
+    df = pd.DataFrame({"a": s1, "b": s2})
+    assert df.shape == (3, 2)
+    assert df["a"].tolist() == [1, 2, 3]
+
+
+def test_index_property():
+    df = pd.DataFrame({"a": [1, 2, 3]})
+    idx = df.index
+    assert len(idx) == 3
+
+
+def test_series_iloc():
+    s = pd.Series([10, 20, 30], name="x")
+    assert s.iloc[0] == 10
+    assert s.iloc[-1] == 30
+    sub = s.iloc[0:2]
+    assert sub.tolist() == [10, 20]

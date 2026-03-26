@@ -39,6 +39,17 @@ class Series:
     def __repr__(self):
         return repr(self._native)
 
+    @property
+    def iloc(self):
+        from .frame import _SeriesiLocIndexer
+        return _SeriesiLocIndexer(self)
+
+    @property
+    def loc(self):
+        # For default RangeIndex, label == position; delegate to iloc
+        from .frame import _SeriesiLocIndexer
+        return _SeriesiLocIndexer(self)
+
     def __getitem__(self, key):
         return self._native.__getitem__(key)
 

@@ -932,6 +932,34 @@ impl PyDataFrame {
         }
     }
 
+    // --- take_rows ---
+
+    #[pymethod]
+    fn take_rows(&self, indices: PyObjectRef, vm: &VirtualMachine) -> PyResult<PyDataFrame> {
+        let list = indices
+            .downcast_ref::<PyList>()
+            .ok_or_else(|| vm.new_type_error("expected list of ints".to_owned()))?;
+        let idx: PyResult<Vec<usize>> = list
+            .borrow_vec()
+            .iter()
+            .map(|x| x.clone().try_into_value::<usize>(vm))
+            .collect();
+        let result = self
+            .inner()
+            .take_rows(&idx?)
+            .map_err(|e| pandas_err(e, vm))?;
+        Ok(PyDataFrame::from_core(result))
+    }
+
+    // --- index property ---
+
+    #[pygetset]
+    fn index(&self, vm: &VirtualMachine) -> PyObjectRef {
+        use crate::py_index::PyIndex;
+        let idx = self.inner().index().clone();
+        PyIndex::from_core(idx).into_pyobject(vm)
+    }
+
     // --- applymap ---
 
     #[pymethod]

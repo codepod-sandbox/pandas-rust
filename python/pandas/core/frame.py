@@ -2,6 +2,126 @@
 import _pandas_native as _native
 
 
+class _iLocIndexer:
+    """Integer-location based indexer for DataFrame."""
+
+    def __init__(self, df):
+        self._df = df
+
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            if key < 0:
+                key = len(self._df) + key
+            row = {}
+            for col in self._df.columns:
+                row[col] = self._df._native.get_column(col).tolist()[key]
+            return row
+        elif isinstance(key, slice):
+            start, stop, step = key.indices(len(self._df))
+            indices = list(range(start, stop, step))
+            return self._df._take_rows(indices)
+        elif isinstance(key, list):
+            return self._df._take_rows(key)
+        elif isinstance(key, tuple):
+            row_key, col_key = key
+            sub = self._df.iloc[row_key]
+            if isinstance(sub, dict):
+                # single row returned as dict; col_key selects from it
+                if isinstance(col_key, int):
+                    col_name = self._df.columns[col_key]
+                    return sub[col_name]
+                elif isinstance(col_key, str):
+                    return sub[col_key]
+                raise TypeError("Invalid col key for single-row iloc: {}".format(type(col_key)))
+            # sub is a DataFrame
+            if isinstance(col_key, int):
+                col_name = sub.columns[col_key]
+                return sub[col_name]
+            elif isinstance(col_key, list):
+                col_names = [sub.columns[i] for i in col_key]
+                return sub[col_names]
+            elif isinstance(col_key, slice):
+                start, stop, step = col_key.indices(len(sub.columns))
+                col_names = [sub.columns[i] for i in range(start, stop, step)]
+                return sub[col_names]
+        raise TypeError("Invalid iloc key type: {}".format(type(key)))
+
+
+class _LocIndexer:
+    """Label-based indexer for DataFrame."""
+
+    def __init__(self, df):
+        self._df = df
+
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return self._df.iloc[key]
+        elif isinstance(key, slice):
+            start = key.start if key.start is not None else 0
+            stop = key.stop
+            if stop is not None:
+                stop = stop + 1  # loc is inclusive on stop
+            new_slice = slice(start, stop, key.step)
+            return self._df.iloc[new_slice]
+        elif isinstance(key, list):
+            return self._df.iloc[key]
+        elif isinstance(key, tuple):
+            row_key, col_key = key
+            sub = self._df.loc[row_key]
+            if isinstance(sub, dict):
+                if isinstance(col_key, str):
+                    return sub[col_key]
+                raise TypeError("Invalid col key for single-row loc: {}".format(type(col_key)))
+            if isinstance(col_key, str):
+                return sub[col_key]
+            elif isinstance(col_key, list):
+                return sub[col_key]
+        raise TypeError("Invalid loc key type: {}".format(type(key)))
+
+
+class _RangeIndex:
+    """Thin Python wrapper around native PyIndex to support len() and iteration."""
+
+    def __init__(self, native_index):
+        self._native = native_index
+
+    def __len__(self):
+        return self._native.__len__()
+
+    def __repr__(self):
+        return repr(self._native)
+
+    def tolist(self):
+        return self._native.tolist()
+
+    def __iter__(self):
+        return iter(self.tolist())
+
+
+class _SeriesiLocIndexer:
+    """Integer-location based indexer for Series."""
+
+    def __init__(self, series):
+        self._series = series
+
+    def __getitem__(self, key):
+        from .series import Series
+        data = self._series._native.tolist()
+        n = len(data)
+        if isinstance(key, int):
+            if key < 0:
+                key = n + key
+            return data[key]
+        elif isinstance(key, slice):
+            start, stop, step = key.indices(n)
+            vals = data[start:stop:step]
+            return Series(vals, name=self._series.name)
+        elif isinstance(key, list):
+            vals = [data[i] for i in key]
+            return Series(vals, name=self._series.name)
+        raise TypeError("Invalid iloc key type for Series: {}".format(type(key)))
+
+
 class DataFrame:
     """Two-dimensional labeled data structure."""
 
@@ -9,7 +129,15 @@ class DataFrame:
         if data is None:
             self._native = _native.DataFrame({})
         elif isinstance(data, dict):
-            self._native = _native.DataFrame(data)
+            from .series import Series
+            # Check if any values are Series objects and unwrap them
+            processed = {}
+            for k, v in data.items():
+                if isinstance(v, Series):
+                    processed[k] = v.tolist()
+                else:
+                    processed[k] = v
+            self._native = _native.DataFrame(processed)
         elif isinstance(data, _native.DataFrame):
             self._native = data
         elif isinstance(data, list):
@@ -62,10 +190,35 @@ class DataFrame:
     def __repr__(self):
         return repr(self._native)
 
+    @property
+    def index(self):
+        return _RangeIndex(self._native.index)
+
+    @property
+    def iloc(self):
+        return _iLocIndexer(self)
+
+    @property
+    def loc(self):
+        return _LocIndexer(self)
+
+    def _take_rows(self, indices):
+        """Select rows by integer position indices."""
+        return DataFrame._from_native(self._native.take_rows(indices))
+
     def __getitem__(self, key):
+        from .series import Series
+        # Boolean Series mask → filter rows
+        if isinstance(key, Series):
+            mask_list = key.tolist()
+            indices = [i for i, v in enumerate(mask_list) if v]
+            return self._take_rows(indices)
+        # Boolean list mask
+        if isinstance(key, list) and len(key) > 0 and isinstance(key[0], bool):
+            indices = [i for i, v in enumerate(key) if v]
+            return self._take_rows(indices)
         result = self._native[key]
         if isinstance(result, _native.Series):
-            from .series import Series
             return Series._from_native(result)
         elif isinstance(result, _native.DataFrame):
             return DataFrame._from_native(result)
