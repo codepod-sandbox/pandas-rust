@@ -331,16 +331,17 @@ def test_transpose_basic():
     df = DataFrame({"a": [1, 2], "b": [3, 4]})
     result = df.T
     assert isinstance(result, DataFrame)
-    # Original 2 rows, 2 cols -> transposed: 2 rows, 3 cols (index col + 2 original rows)
-    assert result.shape[1] == 3  # "" + "0" + "1"
+    # Original 2 rows, 2 cols -> transposed: 2 rows, 2 cols
+    assert result.shape == (2, 2)
+    assert result.columns.tolist() == ["0", "1"]
 
 
 def test_transpose_numeric_values():
     df = DataFrame({"x": [1, 2, 3]})
     result = df.transpose()
-    # Should have columns "", "0", "1", "2"
-    assert "" in result.columns
-    assert result[""].tolist() == ["x"]
+    # 1 col, 3 rows -> 1 row, 3 cols
+    assert result.shape == (1, 3)
+    assert result.columns.tolist() == ["0", "1", "2"]
 
 
 # ---------------------------------------------------------------------------
